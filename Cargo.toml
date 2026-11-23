@@ -5,8 +5,10 @@ edition = "2021"
 rust-version = "1.85"
 description = "Android AOAv2 USB OTG mouse/keyboard rescue bridge with optional live screen mirroring, hardware specs, telemetry, and stdio MCP server"
 license = "MIT"
+homepage = "https://github.com/Maverick0351a/android-web-otg"
 repository = "https://github.com/Maverick0351a/android-web-otg"
 readme = "README.md"
+exclude = ["docs/*.gif", "docs/*.png", ".github/", "GEMINI.md"]
 keywords = ["android", "aoav2", "usb-otg", "hid", "mcp"]
 categories = ["command-line-utilities", "hardware-support", "web-programming::http-server"]
 
