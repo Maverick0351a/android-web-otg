@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "android-web-otg"
+dynamic = ["version"]
+description = "Recover & steer any broken-screen Android phone over USB OTG (AOAv2 HID) from your browser or MCP agent — pure Rust, with optional live ADB Screen Mirroring."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Oscillink" }]
+keywords = ["android", "aoav2", "usb-otg", "hid", "mcp", "broken-screen", "screen-mirror"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Environment :: Web Environment",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Rust",
+  "Topic :: System :: Hardware :: Universal Serial Bus (USB)",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/Maverick0351a/android-web-otg"
+Repository = "https://github.com/Maverick0351a/android-web-otg"
+Issues = "https://github.com/Maverick0351a/android-web-otg/issues"
+
+[tool.maturin]
+bindings = "bin"
+strip = true
+locked = true

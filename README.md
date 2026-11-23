@@ -74,9 +74,16 @@ flowchart LR
 
 ## Quickstart
 
-### 1. Download Prebuilt Binary (Recommended)
+### Install Options (Prebuilt, Rust, Python `uvx`, Docker)
 
-Grab the archive for your OS from the [**latest GitHub Release**](https://github.com/Maverick0351a/android-web-otg/releases/latest) (`x86_64` / `aarch64` Linux, `aarch64` / `x86_64` macOS, or `x86_64` Windows `.zip`, each paired with `SHA256SUMS-*.txt`).
+- **GitHub Releases (Direct Binaries):** Grab the archive for Linux (`x86_64` / `aarch64`), macOS (`aarch64` / `x86_64`), or Windows (`x86_64`) from [**Releases**](https://github.com/Maverick0351a/android-web-otg/releases/latest) (each paired with `SHA256SUMS-*.txt`).
+- **Rust (`crates.io`):** `cargo install android-web-otg --locked`
+- **Python / AI Agents (`uvx` / `pipx` via PyPI):** `uvx android-web-otg` (or `uvx android-web-otg --mcp`)
+- **Docker / Raspberry Pi (`ghcr.io` `amd64` + `arm64`):** `docker pull ghcr.io/maverick0351a/android-web-otg:latest` *(see [Docker & Systemd](#deployment-templates) below)*
+
+### 1. Prebuilt Binary Setup by OS
+
+Grab your OS archive from the [**latest GitHub Release**](https://github.com/Maverick0351a/android-web-otg/releases/latest) (or run `cargo install android-web-otg --locked`):
 
 #### macOS
 
@@ -162,7 +169,24 @@ cargo build --release --locked
 
 ### Built-In Stdio MCP Server (`android-web-otg --mcp`)
 
-Add `android-web-otg` directly to **Antigravity, Claude Code, Cursor, Codex, or Gemini CLI** — zero Python or Node wrapper needed:
+Add `android-web-otg` directly to **Antigravity, Claude Code, Cursor, Codex, or Gemini CLI** — zero Python or Node wrapper needed. Use `uvx` for zero-setup remote launching (recommended once published on PyPI) or point directly at the native binary:
+
+```json
+{
+  "mcpServers": {
+    "android-web-otg": {
+      "command": "uvx",
+      "args": ["android-web-otg", "--mcp"],
+      "env": {
+        "ANDROID_WEB_OTG_ADB": "adb"
+      }
+    }
+  }
+}
+```
+
+<details>
+<summary>Alternative: point MCP directly at a local/prebuilt <code>android-web-otg</code> binary</summary>
 
 ```json
 {
@@ -177,6 +201,8 @@ Add `android-web-otg` directly to **Antigravity, Claude Code, Cursor, Codex, or 
   }
 }
 ```
+
+</details>
 
 And copy [`skills/android-web-otg/SKILL.md`](skills/android-web-otg/SKILL.md) into your agent's skills folder so agents automatically follow the two-phase **Pre-ADB Rescue → Post-ADB Visual** workflow and never request phone PINs in chat logs.
 
@@ -240,10 +266,11 @@ Verified live (Linux Docker host + pure-Rust `v0.1` core) against a physical bro
     sudo systemctl daemon-reload && sudo systemctl enable --now android-web-otg
     ```
   - `ANDROID_WEB_OTG_UNLOCK_CODE` enables the UI **"Unlock with Server Preset"** button; add `--auto-unlock` to `ExecStart` to auto-type on USB attach.
-- **Least-privilege non-root Docker container (`debian:bookworm-slim`, `USER otg`, zero `--privileged`):**
+- **Least-privilege non-root Docker container (`debian:bookworm-slim`, `USER otg`, `linux/amd64` & `linux/arm64`, zero `--privileged`):**
   > Install [`deploy/51-android.rules`](deploy/51-android.rules) on the Linux host first so `/dev/bus/usb/*/*` grants `0660 plugdev` write access.
   ```bash
-  docker build -t android-web-otg -f deploy/Dockerfile .
+  # Pull prebuilt multi-arch image from GitHub Packages (or build locally with: docker build -t ghcr.io/maverick0351a/android-web-otg -f deploy/Dockerfile .)
+  docker pull ghcr.io/maverick0351a/android-web-otg:latest
 
   PLUGDEV_GID="$(getent group plugdev | cut -d: -f3 || true)"
 
@@ -254,7 +281,7 @@ Verified live (Linux Docker host + pure-Rust `v0.1` core) against a physical bro
     -v /dev/bus/usb:/dev/bus/usb \
     ${PLUGDEV_GID:+--group-add "$PLUGDEV_GID"} \
     -e ANDROID_WEB_OTG_TOKEN="replace-with-strong-random-token" \
-    android-web-otg
+    ghcr.io/maverick0351a/android-web-otg:latest
 
   # Or override entrypoint for loopback-only testing without --token:
   docker run --rm --network host \
@@ -263,7 +290,7 @@ Verified live (Linux Docker host + pure-Rust `v0.1` core) against a physical bro
     -v /dev/bus/usb:/dev/bus/usb \
     ${PLUGDEV_GID:+--group-add "$PLUGDEV_GID"} \
     --entrypoint /usr/local/bin/android-web-otg \
-    android-web-otg --host 127.0.0.1 --port 8095
+    ghcr.io/maverick0351a/android-web-otg:latest --host 127.0.0.1 --port 8095
   ```
 
 </details>
