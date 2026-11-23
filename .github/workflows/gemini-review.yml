@@ -1,0 +1,43 @@
+name: Gemini PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gemini-review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check GEMINI_API_KEY configuration
+        id: check_key
+        env:
+          KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "GEMINI_API_KEY secret not set; skipping automated Gemini PR review."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check_key.outputs.has_key == 'true'
+        with:
+          fetch-depth: 0
+
+      - name: Run Gemini CLI contextual review
+        if: steps.check_key.outputs.has_key == 'true'
+        uses: google-github-actions/run-gemini-cli@v0
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number }} against GEMINI.md.
+            Focus on async actor invariants, USB/AOAv2 correctness, anti-CSWSH/CSRF & auth hardening,
+            secret non-leakage, and frontend/API consistency. Keep comments concrete with file:line references.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

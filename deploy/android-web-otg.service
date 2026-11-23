@@ -8,12 +8,17 @@ StartLimitIntervalSec=0
 Type=simple
 User=otg
 Group=plugdev
-# Bind to 127.0.0.1 or a private VPN/Tailscale interface.
-# For non-loopback binds, uncomment and set a strong API token:
-# Environment="ANDROID_WEB_OTG_TOKEN=replace-with-random-token"
+# Store secrets in a root/service-readable 0600 file rather than inline in this unit:
+#   ANDROID_WEB_OTG_TOKEN=replace-with-random-token
+#   ANDROID_WEB_OTG_UNLOCK_CODE=optional-pin-for-auto-unlock
+EnvironmentFile=-/etc/android-web-otg.env
 ExecStart=/usr/local/bin/android-web-otg --host 127.0.0.1 --port 8095
 Restart=on-failure
 RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

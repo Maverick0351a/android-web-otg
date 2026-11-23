@@ -1,6 +1,5 @@
 //! Library root for `android-web-otg`.
 
-pub mod adb;
 pub mod aoa;
 pub mod cli;
 pub mod error;

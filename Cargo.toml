@@ -2,22 +2,26 @@
 name = "android-web-otg"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
-description = "Headless Android AOAv2 USB OTG mouse, keyboard, phone specs, and live telemetry web bridge"
+rust-version = "1.85"
+description = "Headless Android AOAv2 USB OTG mouse, keyboard, hardware specs, and live telemetry web bridge"
 license = "MIT"
-keywords = ["android", "aoa", "aoav2", "usb", "otg", "hid", "scrcpy", "adb"]
+repository = "https://github.com/Maverick0351a/android-web-otg"
+readme = "README.md"
+keywords = ["android", "aoa", "aoav2", "usb", "otg", "hid", "scrcpy"]
 categories = ["command-line-utilities", "hardware-support", "web-programming::http-server"]
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
 clap = { version = "4.6", features = ["derive", "env"] }
 futures-util = "0.3"
-nusb = "0.2"
+getrandom = "0.3"
+nusb = { version = "0.2", features = ["tokio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 subtle = "2.6"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+zeroize = "1"
 
 [dev-dependencies]
 http-body-util = "0.1"

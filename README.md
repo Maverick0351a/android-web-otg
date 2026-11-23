@@ -1,37 +1,52 @@
 # android-web-otg
 
-Browser-based **Android AOAv2 USB OTG Mouse, Keyboard, Phone Specs, and Telemetry Bridge** written in pure Rust (`nusb` + `axum` + `tokio`).
+Browser-based **Android AOAv2 USB OTG Mouse, Keyboard, Hardware Specs, and Telemetry Bridge** written in pure Rust (`nusb` + `axum` + `tokio`).
 
-Plug an Android phone with a broken touchscreen into any **headless Linux server, Raspberry Pi, or workstation**, open a browser tab from anywhere on your trusted LAN/Tailscale network, and drive the phone's cursor & keyboard immediately — **before USB Debugging (`adb`) is even enabled**, and with **zero `libusb` or Python runtime dependencies**.
+Plug an Android phone with a broken touchscreen into any **headless Linux server, Raspberry Pi, or workstation**, open a browser tab over loopback or a trusted Tailscale/VPN tunnel, and steer the device immediately over **EP0 AOAv2 USB HID** — **with USB Debugging (`adb`) still OFF**, **zero `libusb`**, and **zero Python/Node runtime dependencies**.
 
 ```text
-  Stage 1 (Pre-ADB, dead touch, USB Debugging OFF)
+  Pre-ADB USB HID Control Plane (USB Debugging NOT required)
   [Browser UI] ──WS (/ws/hid) / HTTP──▶ [android-web-otg] ──EP0 AOAv2 HID──▶ [Android]
-     • Realistic Phone Bezel Trackpad                                     (MTP + ADB
-     • Masked PIN/Password Quick Unlock & Auto-Insert                      stay active)
-     • USB & AOA Hardware Specs Modal + Live SSE Telemetry
-
-  Stage 2 (Once you turn on USB Debugging + click "Always allow")
-  [Browser UI] ◀──PNG Preview + Tap/Swipe──▶ [android-web-otg] ──USB/ADB──▶ [Android]
-     • Full OS, SoC, RAM, storage, battery specs + live click-to-tap inside phone frame
+     • Free Trackpad + Optional Pointer Lock                              (MTP + existing
+     • Masked PIN/Password Quick Unlock & Auto-Insert                      USB interfaces
+     • Inline 3-Step Guide, Type & D-Pad, TalkBack (Broken LCD)            stay untouched)
+     • USB & AOAv2 Hardware Specs Modal + Live SSE Telemetry
 ```
 
-## Why Not Just `scrcpy --otg`?
+## Hardware Verification
 
-`scrcpy --otg` is fantastic on a local desktop, but it requires an SDL2/X11/Wayland GUI on the machine where the phone is plugged in and requires Zadig driver swaps on Windows. `android-web-otg` turns any **headless Linux/Pi USB bench** into a zero-install WebSocket + browser control surface:
+Verified live against a physical broken-screen Android phone (**`PCD Bengal Max`**, USB `0e8d:2008`, MediaTek, High Speed 480 Mbps, 500 mA) running inside an unprivileged non-root Docker container (`--cap-drop=ALL`, `USER otg`):
 
-- **Single static-friendly Rust binary:** Uses `nusb` directly against Linux `usbfs` — no `libusb`, no Python, no desktop environment required.
-- **EP0-only AOAv2 HID:** Uses USB control requests `51`, `54`, `55`, `56`, `57` without claiming ADB interfaces or calling `ACCESSORY_START`, so MTP and `adb` stay active simultaneously on the same cable.
-- **Low-latency WebSocket HID (`/ws/hid`) + REST fallback:** Smooth Pointer Lock mouse capture, Fixed Free-Move Trackpad mode, scroll/pan wheel, live keyboard forwarding, and TalkBack shortcuts.
-- **Masked Quick Unlock / Auto-Insert:** Optional sidebar PIN/password panel and single-shot USB-attach auto-insert (`ANDROID_WEB_OTG_UNLOCK_CODE` + `--auto-unlock`), logging character counts only and never writing or echoing secrets.
-- **Phone Specs Popup Modal:** Reads USB/AOAv2 descriptors immediately pre-ADB and unlocks full Android OS, SoC/ABI, display resolution/DPI, RAM, `/data` storage, battery/temperature, and kernel details once ADB is authorized.
-- **100% Local Telemetry & Event Log:** Real-time SSE log stream (`/api/telemetry/stream`), HID round-trip latency (`avg` / `last`), packet rates, optional `--log-file` JSONL persistence, and 1-click JSONL export.
+- **AOAv2 HID attach:** Attached cleanly in `mtp` configuration (`AOA v2`) without claiming MTP or requiring `adb`.
+- **Physical screen wakeup & HID response:** Observed directly on hardware that the broken phone's display lit up and responded live to WebSocket HID cursor movements and left clicks at **`0.42–0.60 ms` EP0 round-trip latency** with zero stalled transfers.
+- **Clean shutdown:** `SIGINT` / `SIGTERM` unregisters both virtual HID devices (`hid=1` mouse, `hid=2` keyboard) cleanly (~`0.12s` container stop time).
+
+## Demo & Screenshots
+
+![Live Demo — Free Trackpad, Inline Guide, TalkBack & USB Specs Modal](docs/demo.gif)
+
+| Cockpit Dashboard (Volcanic Obsidian UI) | USB & AOAv2 Hardware Specs Modal |
+|---|---|
+| ![android-web-otg Dashboard](docs/demo-dashboard.png) | ![USB & AOAv2 Hardware Specs Modal](docs/demo-specs-modal.png) |
+
+- **Calm, popup-free controls:** **Free Trackpad** is active by default so dragging and tapping never trigger browser Pointer Lock banners unless you switch to **Pointer Lock** (`Esc` releases). **? Guide** expands inline below the header, and action confirmations appear quietly inline.
+- **Pre-ADB inspection:** Click **Phone Specs** at any time to inspect USB `VID:PID`, AOAv2 protocol version, negotiated link speed, `bMaxPower`, bus/address, and active interface descriptors directly over USB.
+
+## Why Pure-Rust `nusb` AOAv2 Over `scrcpy --otg`?
+
+`scrcpy --otg` is ideal on a local desktop monitor, but it requires an SDL2/X11/Wayland GUI on the machine where the phone is plugged in and requires Zadig driver swaps on Windows. `android-web-otg` turns any **headless Linux/Pi USB bench** into a hardened browser control surface:
+
+- **Zero external runtime deps:** Communicates directly with Linux `usbfs` through pure-Rust async `nusb` (`features = ["tokio"]`) managed by a single-owner `AoaActor` state machine — no `libusb`, no `adb`, no desktop environment.
+- **EP0-only AOAv2 HID:** Uses USB Vendor Control Requests `51`, `54`, `55`, `56`, `57` without claiming bulk/interface endpoints or invoking `ACCESSORY_START`, leaving MTP and future `adb` interfaces free.
+- **Resilient Android `f_accessory` timing:** Waits for HID report-descriptor registration settling (`200 ms`) and retries transient `Stall` errors with exponential backoff without unregistering HID IDs.
+- **Low-latency WebSocket HID (`/ws/hid`) + REST fallback:** Coalesced mouse deltas (`dx`, `dy`, buttons, vertical/horizontal scroll), full HID keyboard forwarding, TalkBack navigation (`Alt+←`, `Alt+→`, `Alt+Enter`), and `Swipe Up` unlock gestures.
+- **Masked Quick Unlock / Auto-Insert:** Optional sidebar unlock panel and single-shot USB-attach auto-insert (`ANDROID_WEB_OTG_UNLOCK_CODE` + `--auto-unlock`), logging character counts only (`zeroize` memory scrubbing; secrets never touch disk, URLs, or telemetry).
+- **Non-blocking Telemetry & SSE Stream:** Lock-free atomic packet counters, HID round-trip latency (`avg` / `last` / `max`), bounded ring buffer (`/api/telemetry/stream` SSE with `Last-Event-ID`), optional background-thread JSONL logging (`--log-file`), and 1-click JSONL export.
 
 ## Prerequisites
 
-- **Linux host (recommended):** Kernel USB (`usbfs`) permissions via `deploy/51-android.rules` (`plugdev` group).
-- **Optional post-ADB features:** `adb` in `PATH` enables Android system specs, live PNG screen preview, and tap/swipe injection inside the phone frame.
-- **Windows hosts:** `nusb` on Windows requires a WinUSB-bound interface if Windows `WUDFWpdMtp` holds the phone exclusively; Linux hosts detach/share EP0 seamlessly out of the box.
+- **Linux host (recommended):** Grant non-root `plugdev` / console `uaccess` access to USB device nodes via [deploy/51-android.rules](deploy/51-android.rules) (`MODE="0660", GROUP="plugdev", TAG+="uaccess"`).
+- **Windows hosts:** `nusb` attempts automatic composite interface fallback, though Android devices held exclusively by `WUDFWpdMtp` may still need a WinUSB interface binding; Linux hosts detach/share EP0 seamlessly out of the box.
 
 ## Quickstart
 
@@ -47,46 +62,62 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 Open **`http://127.0.0.1:8095`** in your browser.
 
-### Useful CLI Flags
+### Common CLI Flags
 
 ```bash
-# Bind to a private VPN/Tailscale IP with API token authentication
+# Bind to a private VPN/Tailscale interface with mandatory API token authentication
 export ANDROID_WEB_OTG_TOKEN="replace-with-strong-random-token"
-android-web-otg --host 100.x.y.z --port 8095
+android-web-otg --host <tailscale-or-lan-ip> --port 8095
 
-# Target a specific USB device and persist local JSONL telemetry
+# Pin to a specific device VID/PID or serial and persist local JSONL telemetry
 android-web-otg --vid 0e8d --pid 2008 --log-file ./otg-telemetry.jsonl
 
-# Single-shot auto-insert of unlock PIN/password once per newly connected phone
+# Single-shot auto-insert of unlock PIN/password once per newly attached phone
 export ANDROID_WEB_OTG_UNLOCK_CODE="1234"
 android-web-otg --auto-unlock --unlock-wake swipe
 ```
 
-> **Tip for completely broken LCD displays:** Press and hold **Volume Up + Volume Down** on the phone for ~3 seconds to turn on Android **TalkBack**, then use the dedicated **TalkBack Navigation** buttons (`Alt+←`, `Alt+→`, `Alt+Enter`) to navigate audibly into Developer Options. *(Note: AOAv2 HID sends physical mouse/keyboard events; pre-ADB video mirroring is not possible until USB Debugging is authorized.)*
+> **Tip for dead LCD screens:** Hold **Volume Up + Volume Down** on the phone for ~3 seconds to toggle Android **TalkBack**, then switch to the **TalkBack (Broken LCD)** tab in **Quick Controls** (`Alt+←`, `Alt+→`, `Alt+Enter`) to navigate by audio into Developer Options. *(AOAv2 HID sends physical mouse and keyboard events; video mirroring requires USB Debugging and lives in the companion multi-device Workbench roadmap.)*
 
 ## Deployment Templates
 
-- **Linux `udev` rules:** [deploy/51-android.rules](deploy/51-android.rules)
-- **`systemd` unit:** [deploy/android-web-otg.service](deploy/android-web-otg.service)
-- **Container (`Debian` + `adb`, single binary):**
+- **`udev` rules (`0660`, `plugdev`, `uaccess`):** [deploy/51-android.rules](deploy/51-android.rules)
+- **Hardened `systemd` service:** [deploy/android-web-otg.service](deploy/android-web-otg.service) (reads `/etc/android-web-otg.env` for `ANDROID_WEB_OTG_TOKEN` / `ANDROID_WEB_OTG_UNLOCK_CODE`)
+- **Least-privilege Docker container (`debian:bookworm-slim`, non-root `USER otg`, zero `--privileged`):**
   ```bash
   docker build -t android-web-otg -f deploy/Dockerfile .
-  docker run --rm --privileged -v /dev/bus/usb:/dev/bus/usb -p 127.0.0.1:8095:8095 android-web-otg
+
+  # Default container entrypoint listens on 0.0.0.0:8095 and requires ANDROID_WEB_OTG_TOKEN:
+  docker run --rm --network host \
+    --cap-drop=ALL \
+    --device-cgroup-rule='c 189:* rmw' \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --group-add "$(getent group plugdev | cut -d: -f3)" \
+    -e ANDROID_WEB_OTG_TOKEN="replace-with-strong-random-token" \
+    android-web-otg
+
+  # Or override entrypoint for loopback-only testing without --token:
+  docker run --rm --network host \
+    --cap-drop=ALL \
+    --device-cgroup-rule='c 189:* rmw' \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --group-add "$(getent group plugdev | cut -d: -f3)" \
+    --entrypoint /usr/local/bin/android-web-otg \
+    android-web-otg --host 127.0.0.1 --port 8095
   ```
 
-## Security Notice
+## Security Architecture
 
-This tool injects full physical keyboard/mouse input into attached Android devices and can query ADB once authorized.
+This service injects physical keyboard and mouse HID events into any matched Android phone attached over USB:
 
-- Always bind to **`127.0.0.1`** or a private VPN/Tailscale interface protected by firewall rules.
-- Set **`--token`** (`ANDROID_WEB_OTG_TOKEN`) whenever binding beyond loopback (`--host 0.0.0.0` or LAN/VPN IP); authentication uses constant-time comparison (`subtle`) across all `/api/*` and `/ws/*` routes.
-- Unlock secrets typed in the UI or passed via `ANDROID_WEB_OTG_UNLOCK_CODE` are **never** saved to browser `localStorage`, returned in API responses, or written to telemetry logs.
+- **Refuses unauthenticated non-loopback binds:** Starting with a non-loopback `--host` (such as `0.0.0.0` or a LAN/VPN IP) without a non-empty `--token` / `ANDROID_WEB_OTG_TOKEN` exits immediately with an error.
+- **Session cookie & header auth:** `POST /api/auth` validates the token using constant-time comparison (`subtle`) and issues an `HttpOnly; SameSite=Strict` CSPRNG session cookie. Query-string `?token=` URL parameters are intentionally unsupported to keep credentials out of browser history and logs.
+- **DNS rebinding & CSWSH defense:** Every `/api/*` and `/ws/*` request validates the `Host` header against configured loopback/bind targets; state-changing HTTP routes and `/ws/hid` WebSocket upgrades enforce same-origin `Origin` and `Sec-Fetch-Site` headers.
+- **Secret isolation:** Manual unlock codes and `ANDROID_WEB_OTG_UNLOCK_CODE` are ASCII-validated, normalized, wrapped in `Zeroizing`, and never stored in browser `localStorage`, JSON responses, or telemetry logs.
 
-## Future Rust Roadmap
+## Roadmap
 
-- Native H.264 + WebRTC 60fps desktop-grade video inside the phone bezel via embedded `scrcpy-server`
-- Pure-Rust USB/ADB client (`adb_client`) eliminating the external `adb` binary dependency
-- Multi-device USB hub switcher & AOAv2 HID gamepad injection (`scrcpy -G` parity)
+Advanced post-ADB orchestration — including multi-device switching, `scrcpy-server` H.264/WebRTC video mirroring, click-to-tap calibration, ADB logcat/shell tools, and timestamped macro recording/replay — is intentionally scoped out of `android-web-otg` into a separate upcoming **Android USB Workbench** project so this crate stays a lean, focused, zero-`adb` OTG rescue utility.
 
 ## License
 

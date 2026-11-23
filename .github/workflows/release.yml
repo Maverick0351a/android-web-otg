@@ -28,16 +28,24 @@ jobs:
       - name: Install ARM64 cross linker
         if: matrix.cross
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Run tests on host architecture
+        if: ${{ !matrix.cross }}
+        run: cargo test --locked
       - name: Build release binary
         env:
-          CARGO_TARGET_AARCH64_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --target ${{ matrix.target }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package tarball
         run: |
-          mkdir -p dist
+          mkdir -p dist/deploy
           cp "target/${{ matrix.target }}/release/android-web-otg" dist/
           cp LICENSE README.md dist/
+          cp deploy/51-android.rules deploy/android-web-otg.service dist/deploy/
           tar -C dist -czf "android-web-otg-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" .
+      - name: Generate checksums
+        run: sha256sum android-web-otg-*.tar.gz > SHA256SUMS-${{ matrix.target }}.txt
       - uses: softprops/action-gh-release@v2
         with:
-          files: android-web-otg-*.tar.gz
+          files: |
+            android-web-otg-*.tar.gz
+            SHA256SUMS-*.txt
