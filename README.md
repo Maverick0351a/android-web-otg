@@ -19,9 +19,7 @@
     <img src="https://img.shields.io/badge/Runtime-Zero%20ADB%20%C2%B7%20Zero%20libusb-22c55e?style=flat-square&labelColor=0a0a0d" alt="Zero ADB Zero libusb" />
     <a href="deploy/Dockerfile"><img src="https://img.shields.io/badge/Docker-Rootless-0ea5e9?style=flat-square&logo=docker&logoColor=white&labelColor=0a0a0d" alt="Rootless Docker" /></a>
     <img src="https://img.shields.io/badge/by-Oscillink-7f0d1d?style=flat-square&labelColor=0a0a0d" alt="by Oscillink" />
-  </p>
-  <p>
-    <img src="docs/badge-gemini.svg" alt="Forged by Gemini 4 Neon" width="90" />
+    <img src="docs/badge-gemini.svg" alt="Forged by Gemini 4 Neon" height="20" />
   </p>
   <p>
     <a href="#demo--screenshots">Demo</a> &middot;
