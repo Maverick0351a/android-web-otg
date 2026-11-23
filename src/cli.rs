@@ -64,6 +64,14 @@ pub struct Cli {
     #[arg(long)]
     pub log_file: Option<PathBuf>,
 
+    /// Path to the `adb` binary used for optional screen mirroring and tap/swipe control.
+    #[arg(long, env = "ANDROID_WEB_OTG_ADB", default_value = "adb")]
+    pub adb_path: String,
+
+    /// Run as a stdio MCP (Model Context Protocol) server instead of launching HTTP/UI.
+    #[arg(long)]
+    pub mcp: bool,
+
     /// Once per newly attached USB phone, automatically wake and type ANDROID_WEB_OTG_UNLOCK_CODE.
     #[arg(long)]
     pub auto_unlock: bool,
@@ -84,6 +92,8 @@ impl fmt::Debug for Cli {
             .field("ignore_vid", &self.ignore_vid)
             .field("token", &self.token.as_ref().map(|_| "[REDACTED]"))
             .field("log_file", &self.log_file)
+            .field("adb_path", &self.adb_path)
+            .field("mcp", &self.mcp)
             .field("auto_unlock", &self.auto_unlock)
             .field("unlock_wake", &self.unlock_wake)
             .finish()
@@ -121,6 +131,8 @@ mod tests {
             ignore_vid: vec![],
             token: Some("super-secret-token".into()),
             log_file: None,
+            adb_path: "adb".into(),
+            mcp: false,
             auto_unlock: false,
             unlock_wake: WakeMethod::Swipe,
         };

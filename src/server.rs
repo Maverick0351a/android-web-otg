@@ -25,6 +25,7 @@ use zeroize::Zeroizing;
 
 use crate::aoa::HidBackend;
 use crate::error::{AppError, Result};
+use crate::mirror::{MirrorStreamMode, ScreenChunk, ScreenMirrorBackend};
 use crate::telemetry::{TelemetryEvent, TelemetryStore};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
@@ -36,6 +37,7 @@ const MAX_WS_MSG_BYTES: usize = 16 * 1024;
 /// Shared server state across HTTP, WebSocket, and SSE handlers.
 pub struct AppState {
     pub bridge: Arc<dyn HidBackend>,
+    pub mirror: Arc<dyn ScreenMirrorBackend>,
     pub telemetry: Arc<TelemetryStore>,
     pub token: Option<Zeroizing<String>>,
     pub sessions: Mutex<VecDeque<String>>,
@@ -43,20 +45,53 @@ pub struct AppState {
     pub shutdown_rx: watch::Receiver<bool>,
 }
 
+/// Return `true` when `host` resolves strictly to loopback (`localhost`, `127.0.0.0/8`, or `::1`).
+#[must_use]
+pub fn is_loopback_host(host: &str) -> bool {
+    let lower = host.trim().to_ascii_lowercase();
+    let stripped =
+        lower.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(lower.as_str());
+    stripped == "localhost" || stripped.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Refuse unauthenticated non-loopback binds so physical USB HID injection is never exposed open.
+pub fn validate_bind_auth(host: &str, has_token: bool) -> std::result::Result<(), String> {
+    if has_token || is_loopback_host(host) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Refusing to bind non-loopback address '{host}' without --token / ANDROID_WEB_OTG_TOKEN. Set a strong token or bind to 127.0.0.1."
+        ))
+    }
+}
+
 /// Build strict `Host` whitelist when bound to loopback; non-loopback binds rely on
 /// same-origin `Origin` + `Sec-Fetch-Site` checks so private MagicDNS hostnames work cleanly.
 #[must_use]
 pub fn allowed_hosts_for_bind(host: &str, port: u16) -> Vec<String> {
     let lower = host.trim().to_ascii_lowercase();
-    if matches!(lower.as_str(), "127.0.0.1" | "localhost" | "::1" | "[::1]") {
-        vec![
+    if is_loopback_host(&lower) {
+        let mut hosts = vec![
             "127.0.0.1".to_string(),
             format!("127.0.0.1:{port}"),
             "localhost".to_string(),
             format!("localhost:{port}"),
             "[::1]".to_string(),
             format!("[::1]:{port}"),
-        ]
+        ];
+        let bracketed = if lower.contains(':') && !lower.starts_with('[') {
+            format!("[{lower}]")
+        } else {
+            lower
+        };
+        let with_port = format!("{bracketed}:{port}");
+        if !hosts.contains(&bracketed) {
+            hosts.push(bracketed);
+        }
+        if !hosts.contains(&with_port) {
+            hosts.push(with_port);
+        }
+        hosts
     } else {
         Vec::new()
     }
@@ -132,6 +167,31 @@ fn default_true() -> bool {
 
 fn default_delay_ms() -> u64 {
     600
+}
+
+#[derive(Deserialize)]
+pub struct MirrorTapPayload {
+    pub x: u32,
+    pub y: u32,
+}
+
+#[derive(Deserialize)]
+pub struct MirrorSwipePayload {
+    pub x1: u32,
+    pub y1: u32,
+    pub x2: u32,
+    pub y2: u32,
+    #[serde(default = "default_swipe_duration_ms")]
+    pub duration_ms: u32,
+}
+
+fn default_swipe_duration_ms() -> u32 {
+    280
+}
+
+#[derive(Deserialize)]
+pub struct ScreenWsQuery {
+    pub mode: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -243,7 +303,7 @@ fn check_origin_and_host(state: &AppState, headers: &HeaderMap, path: &str) -> R
         if !hosts_match(&scheme, auth, host) {
             return Err(AppError::Forbidden("Cross-origin Origin mismatch".into()));
         }
-    } else if path == "/ws/hid" {
+    } else if path.starts_with("/ws/") {
         return Err(AppError::Forbidden("WebSocket requires matching Origin header".into()));
     }
 
@@ -333,7 +393,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/key", post(post_key))
         .route("/api/text", post(post_text))
         .route("/api/unlock", post(post_unlock))
+        .route("/api/mirror/status", get(get_mirror_status))
+        .route("/api/screen/frame", get(get_screen_frame))
+        .route("/api/mirror/tap", post(post_mirror_tap))
+        .route("/api/mirror/swipe", post(post_mirror_swipe))
         .route("/ws/hid", get(ws_hid))
+        .route("/ws/screen", get(ws_screen))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(state.clone(), security_middleware))
         .with_state(state)
@@ -370,8 +435,21 @@ async fn post_auth(
         .into_response())
 }
 
+fn preferred_usb_serial(state: &AppState) -> Option<String> {
+    state.bridge.status_snapshot().device.and_then(|d| (!d.serial.is_empty()).then_some(d.serial))
+}
+
 async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let usb_status = state.bridge.status_snapshot();
+    let mirror_status = state
+        .mirror
+        .status(
+            usb_status
+                .device
+                .as_ref()
+                .and_then(|d| (!d.serial.is_empty()).then(|| d.serial.clone())),
+        )
+        .await;
     Json(json!({
         "ok": true,
         "auth_required": state.token.is_some(),
@@ -380,8 +458,58 @@ async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         "connected": usb_status.connected,
         "device": usb_status.device,
         "error": usb_status.error,
+        "mirror": mirror_status,
         "telemetry": state.telemetry.metrics(),
     }))
+}
+
+async fn get_mirror_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mir = state.mirror.status(preferred_usb_serial(&state)).await;
+    Json(json!({
+        "ok": true,
+        "adb_installed": mir.adb_installed,
+        "state": mir.state,
+        "serial": mir.serial,
+        "screen_width": mir.screen_width,
+        "screen_height": mir.screen_height,
+        "hint": mir.hint,
+    }))
+}
+
+async fn get_screen_frame(State(state): State<Arc<AppState>>) -> Result<Response> {
+    let png = state.mirror.capture_png(preferred_usb_serial(&state)).await?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "no-store")],
+        png,
+    )
+        .into_response())
+}
+
+async fn post_mirror_tap(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<MirrorTapPayload>,
+) -> Result<impl IntoResponse> {
+    state.mirror.tap(preferred_usb_serial(&state), payload.x, payload.y).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn post_mirror_swipe(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<MirrorSwipePayload>,
+) -> Result<impl IntoResponse> {
+    state
+        .mirror
+        .swipe(
+            preferred_usb_serial(&state),
+            payload.x1,
+            payload.y1,
+            payload.x2,
+            payload.y2,
+            payload.duration_ms,
+        )
+        .await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn get_specs(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -678,6 +806,113 @@ async fn handle_ws_hid(mut socket: WebSocket, state: Arc<AppState>) {
             },
             Message::Close(_) => break,
             _ => {}
+        }
+    }
+}
+
+async fn ws_screen(
+    ws: WebSocketUpgrade,
+    Query(q): Query<ScreenWsQuery>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let mode = MirrorStreamMode::from_query(q.mode.as_deref());
+    ws.max_message_size(MAX_WS_MSG_BYTES)
+        .on_upgrade(move |socket| handle_ws_screen(socket, state, mode))
+}
+
+async fn handle_ws_screen(mut socket: WebSocket, state: Arc<AppState>, mode: MirrorStreamMode) {
+    let mut rx = match state
+        .mirror
+        .spawn_stream(preferred_usb_serial(&state), mode, state.shutdown_rx.clone())
+        .await
+    {
+        Ok(rx) => rx,
+        Err(err) => {
+            let _ = socket
+                .send(Message::Text(
+                    json!({ "type": "error", "error": err.to_string() }).to_string().into(),
+                ))
+                .await;
+            let _ = socket.close().await;
+            return;
+        }
+    };
+
+    let mut shutdown_rx = state.shutdown_rx.clone();
+    loop {
+        if *shutdown_rx.borrow() {
+            let _ = socket.close().await;
+            break;
+        }
+        tokio::select! {
+            biased;
+            _ = shutdown_rx.changed() => {
+                let _ = socket.close().await;
+                break;
+            }
+            maybe_chunk = rx.recv() => {
+                let Some(chunk) = maybe_chunk else {
+                    let _ = socket.close().await;
+                    break;
+                };
+                let msg = match chunk {
+                    ScreenChunk::Meta { engine, width, height, codec } => Message::Text(
+                        json!({
+                            "type": "meta",
+                            "engine": engine,
+                            "width": width,
+                            "height": height,
+                            "codec": codec,
+                        })
+                        .to_string()
+                        .into(),
+                    ),
+                    ScreenChunk::Error(error) => Message::Text(
+                        json!({ "type": "error", "error": error }).to_string().into(),
+                    ),
+                    ScreenChunk::H264 { is_keyframe, data } => {
+                        let mut buf = Vec::with_capacity(1 + data.len());
+                        buf.push(if is_keyframe { 0x01 } else { 0x02 });
+                        buf.extend_from_slice(&data);
+                        Message::Binary(buf.into())
+                    }
+                    ScreenChunk::Png(data) => {
+                        let mut buf = Vec::with_capacity(1 + data.len());
+                        buf.push(0x03);
+                        buf.extend_from_slice(&data);
+                        Message::Binary(buf.into())
+                    }
+                };
+                if socket.send(msg).await.is_err() {
+                    break;
+                }
+            }
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_loopback_hosts_and_bind_auth() {
+        for h in ["127.0.0.1", "127.0.0.2", "localhost", "::1", "[::1]"] {
+            assert!(is_loopback_host(h), "{h} should be loopback");
+            assert!(validate_bind_auth(h, false).is_ok());
+            assert!(!allowed_hosts_for_bind(h, 8095).is_empty());
+        }
+        for h in ["0.0.0.0", "::", "192.0.2.10", "198.51.100.2"] {
+            assert!(!is_loopback_host(h), "{h} should not be loopback");
+            assert!(validate_bind_auth(h, false).is_err());
+            assert!(validate_bind_auth(h, true).is_ok());
+            assert!(allowed_hosts_for_bind(h, 8095).is_empty());
         }
     }
 }

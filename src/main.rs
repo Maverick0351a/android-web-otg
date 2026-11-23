@@ -13,7 +13,9 @@ use zeroize::Zeroizing;
 
 use android_web_otg::aoa::{DeviceFilter, HidBackend, NusbAoaBridge};
 use android_web_otg::cli::Cli;
-use android_web_otg::server::{allowed_hosts_for_bind, build_router, AppState};
+use android_web_otg::mcp::run_stdio_mcp;
+use android_web_otg::mirror::{AdbMirrorBackend, ScreenMirrorBackend};
+use android_web_otg::server::{allowed_hosts_for_bind, build_router, validate_bind_auth, AppState};
 use android_web_otg::telemetry::TelemetryStore;
 
 async fn shutdown_signal() {
@@ -56,6 +58,13 @@ async fn main() -> ExitCode {
         None => None,
     };
 
+    if !args.mcp {
+        if let Err(msg) = validate_bind_auth(&args.host, token.is_some()) {
+            eprintln!("Error: {msg}");
+            return ExitCode::from(2);
+        }
+    }
+
     let telemetry = match TelemetryStore::new(300, args.log_file) {
         Ok(store) => Arc::new(store),
         Err(err) => {
@@ -64,29 +73,23 @@ async fn main() -> ExitCode {
         }
     };
 
-    telemetry.log(
-        "info",
-        "system",
-        format!(
-            "Starting android-web-otg v{} on http://{}:{}",
-            env!("CARGO_PKG_VERSION"),
-            args.host,
-            args.port
-        ),
-        None,
-    );
-
-    if !matches!(args.host.as_str(), "127.0.0.1" | "localhost" | "::1" | "[::1]") && token.is_none()
-    {
-        eprintln!(
-            "WARNING: Binding to non-loopback address {} without --token. \
-             Only expose this over a trusted VPN/Tailscale interface or set --token.",
-            args.host
-        );
+    if args.mcp {
         telemetry.log(
-            "warn",
+            "info",
             "system",
-            format!("Non-loopback bind ({}) without --token auth", args.host),
+            format!("Starting android-web-otg v{} in stdio MCP mode", env!("CARGO_PKG_VERSION")),
+            None,
+        );
+    } else {
+        telemetry.log(
+            "info",
+            "system",
+            format!(
+                "Starting android-web-otg v{} on http://{}:{}",
+                env!("CARGO_PKG_VERSION"),
+                args.host,
+                args.port
+            ),
             None,
         );
     }
@@ -118,10 +121,27 @@ async fn main() -> ExitCode {
         shutdown_rx.clone(),
     );
     let bridge: Arc<dyn HidBackend> = bridge_impl;
+    let mirror: Arc<dyn ScreenMirrorBackend> =
+        Arc::new(AdbMirrorBackend::new(args.adb_path, telemetry.clone()));
+
+    if args.mcp {
+        let mcp_res = tokio::select! {
+            res = run_stdio_mcp(bridge, mirror, telemetry, shutdown_rx) => res,
+            () = shutdown_signal() => Ok(()),
+        };
+        let _ = shutdown_tx.send(true);
+        let _ = tokio::time::timeout(Duration::from_secs(2), actor_handle).await;
+        if let Err(err) = mcp_res {
+            eprintln!("MCP server error: {err}");
+            return ExitCode::from(1);
+        }
+        return ExitCode::SUCCESS;
+    }
 
     let allowed_hosts = allowed_hosts_for_bind(&args.host, args.port);
     let state = Arc::new(AppState {
         bridge,
+        mirror,
         telemetry,
         token,
         sessions: Mutex::new(VecDeque::new()),

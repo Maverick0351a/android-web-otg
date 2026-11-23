@@ -1,3 +1,8 @@
+# One-time setup:
+#   sudo groupadd -f plugdev && sudo useradd -r -g plugdev -s /sbin/nologin otg
+#   sudo install -m 0755 android-web-otg /usr/local/bin/android-web-otg
+#   sudo install -m 0600 /dev/null /etc/android-web-otg.env   # add secrets below
+
 [Unit]
 Description=android-web-otg USB OTG Mouse/Keyboard Web Bridge
 After=network-online.target
@@ -8,9 +13,11 @@ StartLimitIntervalSec=0
 Type=simple
 User=otg
 Group=plugdev
-# Store secrets in a root/service-readable 0600 file rather than inline in this unit:
+# Store secrets in a root/service-readable 0600 file (/etc/android-web-otg.env):
 #   ANDROID_WEB_OTG_TOKEN=replace-with-random-token
-#   ANDROID_WEB_OTG_UNLOCK_CODE=optional-pin-for-auto-unlock
+#   ANDROID_WEB_OTG_UNLOCK_CODE=optional-pin-for-server-preset-button
+# Note: ANDROID_WEB_OTG_UNLOCK_CODE enables the "Unlock with Server Preset" button;
+#       append `--auto-unlock` to ExecStart below to auto-type it on USB attach.
 EnvironmentFile=-/etc/android-web-otg.env
 ExecStart=/usr/local/bin/android-web-otg --host 127.0.0.1 --port 8095
 Restart=on-failure

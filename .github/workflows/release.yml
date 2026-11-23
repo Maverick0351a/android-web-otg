@@ -29,6 +29,10 @@ jobs:
             runner: macos-latest
             cross: false
             os: macos
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            cross: true
+            os: macos
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +40,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Install ARM64 cross linker
-        if: matrix.cross
+        if: ${{ matrix.cross && matrix.os == 'linux' }}
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Run tests (Unix host architecture)
         if: ${{ !matrix.cross && matrix.os != 'windows' }}
@@ -51,9 +55,10 @@ jobs:
       - name: Package Unix tarball & checksums
         if: ${{ matrix.os != 'windows' }}
         run: |
-          mkdir -p dist
+          mkdir -p dist dist/skills/android-web-otg
           cp "target/${{ matrix.target }}/release/android-web-otg" dist/
           cp LICENSE README.md dist/
+          cp skills/android-web-otg/SKILL.md dist/skills/android-web-otg/
           if [ "${{ matrix.os }}" = "linux" ]; then
             mkdir -p dist/deploy
             cp deploy/51-android.rules deploy/android-web-otg.service dist/deploy/
@@ -69,9 +74,10 @@ jobs:
         if: ${{ matrix.os == 'windows' }}
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          New-Item -ItemType Directory -Force -Path dist, dist/skills/android-web-otg | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/android-web-otg.exe" dist/
           Copy-Item LICENSE, README.md dist/
+          Copy-Item skills/android-web-otg/SKILL.md dist/skills/android-web-otg/
           $archive = "android-web-otg-${{ github.ref_name }}-${{ matrix.target }}.zip"
           Compress-Archive -Path dist/* -DestinationPath $archive -Force
           $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
