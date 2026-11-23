@@ -8,7 +8,7 @@ COPY static ./static
 RUN set -eux; \
     host_arch="$(uname -m)"; \
     if [ "${TARGETARCH:-}" = "arm64" ] && [ "${host_arch}" != "aarch64" ]; then \
-      apt-get update && apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/*; \
+      apt-get update && apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross && rm -rf /var/lib/apt/lists/*; \
       rustup target add aarch64-unknown-linux-gnu; \
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
         cargo build --release --locked --target aarch64-unknown-linux-gnu; \
