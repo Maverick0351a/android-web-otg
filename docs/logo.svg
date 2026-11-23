@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="android-web-otg by Oscillink">
+  <defs>
+    <linearGradient id="obsidianBg" x1="14" y1="14" x2="242" y2="242" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#171722"/>
+      <stop offset="52%" stop-color="#07070c"/>
+      <stop offset="100%" stop-color="#220710"/>
+    </linearGradient>
+    <linearGradient id="titaniumBevel" x1="14" y1="14" x2="210" y2="206" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f4f4f6" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="#a1a1aa" stop-opacity="0.28"/>
+    </linearGradient>
+    <linearGradient id="crimsonBevel" x1="242" y1="48" x2="50" y2="242" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff3b5c"/>
+      <stop offset="55%" stop-color="#ef233c"/>
+      <stop offset="100%" stop-color="#7f0d1d"/>
+    </linearGradient>
+    <linearGradient id="chassisGrad" x1="80" y1="42" x2="176" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#d4d4d8"/>
+      <stop offset="48%" stop-color="#525260"/>
+      <stop offset="100%" stop-color="#ef233c" stop-opacity="0.85"/>
+    </linearGradient>
+    <linearGradient id="cursorGrad" x1="126" y1="108" x2="182" y2="176" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff5c77"/>
+      <stop offset="55%" stop-color="#ef233c"/>
+      <stop offset="100%" stop-color="#9e0e24"/>
+    </linearGradient>
+    <radialGradient id="crimsonGlow" cx="126" cy="112" r="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ef233c" stop-opacity="0.34"/>
+      <stop offset="100%" stop-color="#ef233c" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="shieldClip">
+      <polygon points="30,14 206,14 242,50 242,226 226,242 50,242 14,206 14,30"/>
+    </clipPath>
+    <clipPath id="screenClip">
+      <rect x="89" y="53" width="78" height="134" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <!-- Cleaved Volcanic Obsidian Shield -->
+  <polygon points="30,14 206,14 242,50 242,226 226,242 50,242 14,206 14,30" fill="url(#obsidianBg)"/>
+
+  <!-- Inner specular facet + crimson focal aura -->
+  <g clip-path="url(#shieldClip)">
+    <polygon points="14,14 156,14 72,118 14,118" fill="#ffffff" fill-opacity="0.045"/>
+    <circle cx="126" cy="112" r="70" fill="url(#crimsonGlow)"/>
+    <!-- Top-right molten crimson notch -->
+    <polygon points="204,14 242,14 242,52 228,52 204,28" fill="#ef233c"/>
+  </g>
+
+  <!-- Split titanium (top/left) & crimson (right/bottom) beveled edges -->
+  <polyline points="14,206 14,30 30,14 206,14" fill="none" stroke="url(#titaniumBevel)" stroke-width="2.5" stroke-linejoin="round"/>
+  <polyline points="206,14 242,50 242,226 226,242 50,242 14,206" fill="none" stroke="url(#crimsonBevel)" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- Minimalist Smartphone Silhouette -->
+  <rect x="76" y="72" width="3" height="22" rx="1.5" fill="#525260"/>
+  <rect x="76" y="100" width="3" height="16" rx="1.5" fill="#525260"/>
+  <rect x="177" y="84" width="3" height="26" rx="1.5" fill="#ef233c"/>
+
+  <rect x="81" y="42" width="94" height="156" rx="16" fill="#0b0b10" stroke="url(#chassisGrad)" stroke-width="2.6"/>
+  <rect x="89" y="53" width="78" height="134" rx="10" fill="#040407" stroke="#242430" stroke-width="1.2"/>
+
+  <!-- Earpiece + Crimson LED -->
+  <rect x="113" y="46" width="24" height="3.2" rx="1.6" fill="#272734"/>
+  <circle cx="143" cy="47.6" r="1.8" fill="#ff3b5c"/>
+
+  <!-- Screen trackpad matrix + hairline glass crack + OTG tap ripples -->
+  <g clip-path="url(#screenClip)">
+    <g fill="#d4d4d8" fill-opacity="0.16">
+      <circle cx="104" cy="70" r="1.2"/><circle cx="120" cy="70" r="1.2"/><circle cx="136" cy="70" r="1.2"/><circle cx="152" cy="70" r="1.2"/>
+      <circle cx="104" cy="88" r="1.2"/><circle cx="120" cy="88" r="1.2"/><circle cx="136" cy="88" r="1.2"/><circle cx="152" cy="88" r="1.2"/>
+      <circle cx="104" cy="106" r="1.2"/><circle cx="120" cy="106" r="1.2"/><circle cx="136" cy="106" r="1.2"/><circle cx="152" cy="106" r="1.2"/>
+      <circle cx="104" cy="124" r="1.2"/><circle cx="120" cy="124" r="1.2"/><circle cx="136" cy="124" r="1.2"/><circle cx="152" cy="124" r="1.2"/>
+      <circle cx="104" cy="142" r="1.2"/><circle cx="120" cy="142" r="1.2"/><circle cx="136" cy="142" r="1.2"/><circle cx="152" cy="142" r="1.2"/>
+      <circle cx="104" cy="160" r="1.2"/><circle cx="120" cy="160" r="1.2"/><circle cx="136" cy="160" r="1.2"/><circle cx="152" cy="160" r="1.2"/>
+    </g>
+    <!-- Subtle broken-glass diagonal shards -->
+    <polyline points="89,144 109,128 117,134 139,116" fill="none" stroke="#d4d4d8" stroke-opacity="0.22" stroke-width="1.2" stroke-linecap="round"/>
+    <polyline points="109,128 103,108" fill="none" stroke="#d4d4d8" stroke-opacity="0.16" stroke-width="1.1" stroke-linecap="round"/>
+    <!-- Tap ripples centered at cursor tip -->
+    <circle cx="126" cy="110" r="24" fill="none" stroke="#ef233c" stroke-opacity="0.38" stroke-width="1.6"/>
+    <circle cx="126" cy="110" r="13" fill="none" stroke="#ff3b5c" stroke-opacity="0.72" stroke-width="1.8"/>
+  </g>
+
+  <!-- USB-C / AOAv2 OTG Trace below phone -->
+  <rect x="119" y="196" width="18" height="4" rx="2" fill="#d4d4d8"/>
+  <path d="M128,200 V214 M128,214 L106,214 L98,222 M128,214 L150,214 L158,222" fill="none" stroke="#d4d4d8" stroke-opacity="0.78" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="96" cy="224" r="3.4" fill="#ef233c" stroke="#f4f4f6" stroke-width="1.2"/>
+  <circle cx="160" cy="224" r="3.4" fill="#ef233c" stroke="#f4f4f6" stroke-width="1.2"/>
+  <circle cx="128" cy="223" r="3.2" fill="#d4d4d8"/>
+  <line x1="128" y1="214" x2="128" y2="220" stroke="#d4d4d8" stroke-opacity="0.78" stroke-width="2.2"/>
+
+  <!-- Precision HID Mouse Cursor Arrow -->
+  <polygon points="126,110 182,135 153,143 169,169 158,176 142,150 128,169" fill="url(#cursorGrad)" stroke="#f4f4f6" stroke-width="2.3" stroke-linejoin="round"/>
+</svg>
