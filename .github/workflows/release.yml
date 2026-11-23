@@ -163,10 +163,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ runner.os != 'Linux' }}
       - uses: PyO3/maturin-action@v1
         with:
           command: build
-          args: --release --out dist --target ${{ matrix.target }}
+          target: ${{ matrix.target }}
+          args: --release --out dist
           manylinux: ${{ matrix.manylinux }}
       - uses: actions/upload-artifact@v4
         with:
@@ -203,4 +206,5 @@ jobs:
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true

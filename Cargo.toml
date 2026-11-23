@@ -1,6 +1,6 @@
 [package]
 name = "android-web-otg"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.85"
 description = "Android AOAv2 USB OTG mouse/keyboard rescue bridge with optional live screen mirroring, hardware specs, telemetry, and stdio MCP server"
