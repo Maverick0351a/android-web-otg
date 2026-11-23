@@ -1,21 +1,37 @@
-# Android USB permissions for android-web-otg (nusb EP0 AOAv2 HID)
+# Android USB permissions for android-web-otg (pure-Rust nusb EP0 AOAv2 HID)
 # Copy to /etc/udev/rules.d/51-android.rules and run:
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# Universal fallback for any USB device exposing MTP (covers unrecognized OEMs/ODMs)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_MTP_DEVICE}=="1", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# Major Android & AOSP device Vendor IDs (strict 0660 + plugdev + console uaccess)
+SUBSYSTEM=="usb", ATTR{idVendor}=="045e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0489", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0502", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0955", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0b05", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0bb4", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0fce", MODE="0660", GROUP="plugdev", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0660", GROUP="plugdev", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1004", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="12d1", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1782", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="17ef", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1949", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="19d2", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1bbb", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1f3a", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2207", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="22b8", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="22d9", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="2717", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2a45", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="2a70", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2ae5", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="2d95", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e04", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="34e4", MODE="0660", GROUP="plugdev", TAG+="uaccess"

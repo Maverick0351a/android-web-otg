@@ -16,9 +16,19 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
             cross: false
+            os: linux
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-latest
             cross: true
+            os: linux
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            cross: false
+            os: windows
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            cross: false
+            os: macos
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -28,24 +38,47 @@ jobs:
       - name: Install ARM64 cross linker
         if: matrix.cross
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Run tests on host architecture
-        if: ${{ !matrix.cross }}
+      - name: Run tests (Unix host architecture)
+        if: ${{ !matrix.cross && matrix.os != 'windows' }}
         run: cargo test --locked
+      - name: Run tests (Windows host architecture)
+        if: ${{ matrix.os == 'windows' }}
+        run: cargo test --lib --tests --locked
       - name: Build release binary
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --locked --target ${{ matrix.target }}
-      - name: Package tarball
+      - name: Package Unix tarball & checksums
+        if: ${{ matrix.os != 'windows' }}
         run: |
-          mkdir -p dist/deploy
+          mkdir -p dist
           cp "target/${{ matrix.target }}/release/android-web-otg" dist/
           cp LICENSE README.md dist/
-          cp deploy/51-android.rules deploy/android-web-otg.service dist/deploy/
-          tar -C dist -czf "android-web-otg-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" .
-      - name: Generate checksums
-        run: sha256sum android-web-otg-*.tar.gz > SHA256SUMS-${{ matrix.target }}.txt
+          if [ "${{ matrix.os }}" = "linux" ]; then
+            mkdir -p dist/deploy
+            cp deploy/51-android.rules deploy/android-web-otg.service dist/deploy/
+          fi
+          archive="android-web-otg-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
+          tar -C dist -czf "$archive" .
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$archive" > "SHA256SUMS-${{ matrix.target }}.txt"
+          else
+            shasum -a 256 "$archive" > "SHA256SUMS-${{ matrix.target }}.txt"
+          fi
+      - name: Package Windows zip & checksums
+        if: ${{ matrix.os == 'windows' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/android-web-otg.exe" dist/
+          Copy-Item LICENSE, README.md dist/
+          $archive = "android-web-otg-${{ github.ref_name }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path dist/* -DestinationPath $archive -Force
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
+          "$hash  $archive" | Set-Content -Encoding ascii "SHA256SUMS-${{ matrix.target }}.txt"
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             android-web-otg-*.tar.gz
+            android-web-otg-*.zip
             SHA256SUMS-*.txt
