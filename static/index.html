@@ -299,6 +299,26 @@
     box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.45);
     background-color: #051109;
   }
+  .mirror-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: none;
+    background: #020204;
+    z-index: 0;
+  }
+  .phone-screen.mirror-live {
+    background-image: none;
+    background-color: #020204;
+  }
+  .phone-screen.mirror-live .mirror-canvas { display: block; }
+  .phone-screen.mirror-live .phone-reticle,
+  .phone-screen.mirror-live .otg-badge,
+  .phone-screen.mirror-live .otg-hint { display: none; }
+  .phone-screen.tap-mode { cursor: pointer; }
+  .phone-screen.tap-mode .vcursor { display: none; }
   .phone-reticle {
     position: absolute;
     left: 50%;
@@ -628,6 +648,7 @@
     </div>
     <div class="row">
       <span id="usbPill" class="pill err"><span class="dot"></span>USB OTG: Checking</span>
+      <span id="adbPill" class="pill"><span class="dot"></span>Mirror: Checking</span>
       <span id="wsPill" class="pill"><span class="dot"></span>WS: Connecting</span>
       <button id="btnHelp" type="button">? Guide</button>
       <button id="btnSpecs" type="button">Phone Specs</button>
@@ -657,9 +678,22 @@
         <div class="row">
           <button id="modeDrag" class="sm active" type="button">Free Trackpad</button>
           <button id="modeLock" class="sm" type="button">Pointer Lock</button>
+          <button id="modeTap" class="sm" type="button" disabled title="Start Mirror Screen first to tap or swipe directly on the display">Tap Mirror</button>
           <button id="btnHoldLeft" class="sm" type="button">Hold Left</button>
         </div>
         <label class="muted" style="display:flex;align-items:center;gap:5px;">Sens <input id="sens" type="range" min="0.5" max="3.0" step="0.25" value="1.25" style="width:68px;"><span id="sensVal" class="sens-val">1.25&times;</span></label>
+      </div>
+
+      <div class="row" id="mirrorControls" style="width:100%; justify-content:space-between;">
+        <div class="row">
+          <button id="btnMirror" class="sm" type="button">Mirror Screen</button>
+          <select id="mirrorMode" title="Live screen mirror transport (Auto prefers WebCodecs H.264 with instant PNG fallback)">
+            <option value="auto">Auto (H.264 / PNG)</option>
+            <option value="h264">H.264 Live</option>
+            <option value="png">PNG Safe</option>
+          </select>
+        </div>
+        <span id="mirrorMeta" class="muted" style="font-family:var(--font-mono);font-size:0.75rem;">OTG Only (No ADB)</span>
       </div>
 
       <div class="phone-chassis">
@@ -670,8 +704,9 @@
             <span id="aoaBadge">EP0 OTG</span>
           </div>
 
-          <!-- Trackpad Mode Surface -->
+          <!-- Trackpad & Live Screen Mirror Surface -->
           <div id="pad" class="phone-screen" tabindex="0">
+            <canvas id="mirrorCanvas" class="mirror-canvas"></canvas>
             <div class="otg-badge" id="otgBadge">OTG HID Mode — Steering physical phone</div>
             <div class="phone-reticle"></div>
             <div class="vcursor" id="vcursor"></div>
@@ -820,7 +855,7 @@
     <div class="metrics-grid">
       <div class="metric-tile"><div class="metric-label">Mouse Pkts</div><div class="metric-val" id="mMouse">0</div></div>
       <div class="metric-tile"><div class="metric-label">Key Pkts</div><div class="metric-val" id="mKeys">0</div></div>
-      <div class="metric-tile"><div class="metric-label">HID Latency</div><div class="metric-val" id="mLat">0.0 ms</div></div>
+      <div class="metric-tile"><div class="metric-label">HID Latency <span style="font-size:0.62rem;opacity:0.75;text-transform:none;">(avg/last/max)</span></div><div class="metric-val" id="mLat">0 / 0 / 0 ms</div></div>
       <div class="metric-tile"><div class="metric-label">Rate</div><div class="metric-val" id="mRate">0.0/s</div></div>
       <div class="metric-tile"><div class="metric-label">Reconnects</div><div class="metric-val" id="mRec">0</div></div>
       <div class="metric-tile"><div class="metric-label">Errors</div><div class="metric-val" id="mErr">0</div></div>
@@ -889,7 +924,18 @@ const state = {
   sse: null,
   sseLive: false,
   pulseTimer: null,
-  statusTimer: null
+  statusTimer: null,
+  mirrorInfo: null,
+  mirrorActive: false,
+  tapMode: false,
+  tapStart: null,
+  mirrorWs: null,
+  mirrorW: 0,
+  mirrorH: 0,
+  mirrorCodec: null,
+  videoDecoder: null,
+  waitKeyframe: true,
+  pngDecoding: false
 };
 
 function setActionStatus(msg, isErr = false) {
@@ -926,6 +972,7 @@ function pauseLiveStreams() {
   if (state.wsTimer) { clearTimeout(state.wsTimer); state.wsTimer = null; }
   if (state.ws) { const old = state.ws; state.ws = null; try { old.close(); } catch (_) {} }
   if (state.sse) { try { state.sse.close(); } catch (_) {} state.sse = null; state.sseLive = false; }
+  stopMirror();
 }
 
 async function apiFetch(url, opts = {}) {
@@ -1032,13 +1079,17 @@ function moveVirtualCursor(dx, dy) {
   vcursor.style.top = state.vcY + "px";
 }
 
-function showRipple() {
+function showRippleAt(x, y) {
   const el = document.createElement("div");
   el.className = "ripple";
-  el.style.left = state.vcX + "px";
-  el.style.top = state.vcY + "px";
+  el.style.left = x + "px";
+  el.style.top = y + "px";
   pad.appendChild(el);
   setTimeout(() => el.remove(), 420);
+}
+
+function showRipple() {
+  showRippleAt(state.vcX, state.vcY);
 }
 
 function flushMouse() {
@@ -1070,23 +1121,42 @@ function queueDelta(dx, dy, vscroll = 0, hscroll = 0) {
   if (!state.flushTimer) state.flushTimer = setTimeout(flushMouse, 12);
 }
 
-function setOtgMode(drag) {
-  state.dragMode = drag;
+function setInputMode(mode) {
+  state.dragMode = mode === "drag";
+  state.tapMode = mode === "tap" && state.mirrorActive;
   state.dragging = false;
+  state.tapStart = null;
   pad.classList.remove("active-drag");
-  if (document.pointerLockElement === pad) document.exitPointerLock();
-  document.getElementById("modeLock").classList.toggle("active", !drag);
-  document.getElementById("modeDrag").classList.toggle("active", drag);
-  document.getElementById("padTitle").textContent = drag
-    ? "Free Trackpad \u2014 drag to move, tap to click"
-    : "Pointer Lock \u2014 click bezel to capture";
-  document.getElementById("padSub").innerHTML = drag
-    ? "Drag inside bezel to steer cursor \u00b7 Tap to click \u00b7 Scroll wheel pans."
-    : "Locks OS pointer inside bezel (moves cursor freely). Press <b>Esc</b> to release.";
+  pad.classList.toggle("tap-mode", state.tapMode);
+  if (mode !== "lock" && document.pointerLockElement === pad) document.exitPointerLock();
+  document.getElementById("modeLock").classList.toggle("active", mode === "lock");
+  document.getElementById("modeDrag").classList.toggle("active", mode === "drag");
+  document.getElementById("modeTap").classList.toggle("active", state.tapMode);
+  document.getElementById("padTitle").textContent = state.tapMode
+    ? "Tap Mirror \u2014 click to tap, drag to swipe"
+    : (state.dragMode
+      ? "Free Trackpad \u2014 drag to move, tap to click"
+      : "Pointer Lock \u2014 click bezel to capture");
+  document.getElementById("padSub").innerHTML = state.tapMode
+    ? "Sends exact pixel taps &amp; swipes over ADB while mirror is live."
+    : (state.dragMode
+      ? "Drag inside bezel to steer cursor \u00b7 Tap to click \u00b7 Scroll wheel pans."
+      : "Locks OS pointer inside bezel (moves cursor freely). Press <b>Esc</b> to release.");
 }
 
-document.getElementById("modeLock").onclick = () => setOtgMode(false);
-document.getElementById("modeDrag").onclick = () => setOtgMode(true);
+function setOtgMode(drag) {
+  setInputMode(drag ? "drag" : "lock");
+}
+
+document.getElementById("modeLock").onclick = () => setInputMode("lock");
+document.getElementById("modeDrag").onclick = () => setInputMode("drag");
+document.getElementById("modeTap").onclick = () => {
+  if (!state.mirrorActive) {
+    setActionStatus("Start Mirror Screen first before using Tap Mirror.", true);
+    return;
+  }
+  setInputMode("tap");
+};
 document.getElementById("btnHoldLeft").onclick = () => {
   state.holdLeft = !state.holdLeft;
   state.curButtons = state.holdLeft ? (state.curButtons | 1) : (state.curButtons & ~1);
@@ -1114,6 +1184,14 @@ document.addEventListener("pointerlockchange", () => {
 
 pad.addEventListener("contextmenu", e => e.preventDefault());
 pad.addEventListener("mousedown", e => {
+  if (state.tapMode && state.mirrorActive && e.button === 0) {
+    state.tapStart = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      phonePt: mapClientPointToPhone(e.clientX, e.clientY)
+    };
+    return;
+  }
   if (!state.dragMode) {
     if (document.pointerLockElement !== pad) {
       Promise.resolve(pad.requestPointerLock()).catch(() => {});
@@ -1133,7 +1211,30 @@ pad.addEventListener("mousedown", e => {
   }
 });
 
-window.addEventListener("mouseup", e => {
+window.addEventListener("mouseup", async e => {
+  if (state.tapStart) {
+    const start = state.tapStart;
+    state.tapStart = null;
+    const rect = pad.getBoundingClientRect();
+    showRippleAt(e.clientX - rect.left, e.clientY - rect.top);
+    const endPt = mapClientPointToPhone(e.clientX, e.clientY);
+    if (!start.phonePt || !endPt) return;
+    const dist = Math.hypot(e.clientX - start.clientX, e.clientY - start.clientY);
+    if (dist > 10) {
+      const res = await post("/api/mirror/swipe", {
+        x1: start.phonePt.x,
+        y1: start.phonePt.y,
+        x2: endPt.x,
+        y2: endPt.y,
+        duration_ms: 280
+      });
+      if (res && res.ok) setActionStatus(`ADB swipe (${start.phonePt.x},${start.phonePt.y}) \u2192 (${endPt.x},${endPt.y})`);
+    } else {
+      const res = await post("/api/mirror/tap", { x: start.phonePt.x, y: start.phonePt.y });
+      if (res && res.ok) setActionStatus(`ADB tap (${start.phonePt.x}, ${start.phonePt.y})`);
+    }
+    return;
+  }
   if (state.dragMode && state.dragging) {
     const wasTap = !state.dragMoved && e.button === 0;
     state.dragging = false;
@@ -1171,6 +1272,230 @@ pad.addEventListener("wheel", e => {
     queueDelta(0, 0, v, h);
   }
 }, {passive: false});
+
+// Live Screen Mirror (WebCodecs H.264 + PNG Fallback + Tap Mirror Mapper)
+const mirrorCanvas = document.getElementById("mirrorCanvas");
+const mirrorCtx = mirrorCanvas.getContext("2d");
+
+function mapClientPointToPhone(clientX, clientY) {
+  const rect = pad.getBoundingClientRect();
+  const pw = state.mirrorW || mirrorCanvas.width || 0;
+  const ph = state.mirrorH || mirrorCanvas.height || 0;
+  if (!rect.width || !rect.height || !pw || !ph) return null;
+  const scale = Math.min(rect.width / pw, rect.height / ph);
+  const drawnW = pw * scale;
+  const drawnH = ph * scale;
+  const offX = (rect.width - drawnW) / 2;
+  const offY = (rect.height - drawnH) / 2;
+  const nx = Math.max(0, Math.min(1, (clientX - rect.left - offX) / drawnW));
+  const ny = Math.max(0, Math.min(1, (clientY - rect.top - offY) / drawnH));
+  return { x: Math.round(nx * (pw - 1)), y: Math.round(ny * (ph - 1)) };
+}
+
+function closeVideoDecoder() {
+  if (state.videoDecoder) {
+    try { state.videoDecoder.close(); } catch (_) {}
+    state.videoDecoder = null;
+  }
+  state.mirrorCodec = null;
+  state.waitKeyframe = true;
+}
+
+function ensureVideoDecoder(codec) {
+  if (typeof VideoDecoder !== "function" || !codec) return false;
+  if (state.videoDecoder && state.videoDecoder.state === "configured" && state.mirrorCodec === codec) {
+    return true;
+  }
+  closeVideoDecoder();
+  try {
+    const dec = new VideoDecoder({
+      output: frame => {
+        try {
+          if (mirrorCanvas.width !== frame.displayWidth || mirrorCanvas.height !== frame.displayHeight) {
+            mirrorCanvas.width = frame.displayWidth;
+            mirrorCanvas.height = frame.displayHeight;
+          }
+          state.mirrorW = frame.displayWidth;
+          state.mirrorH = frame.displayHeight;
+          mirrorCtx.drawImage(frame, 0, 0);
+        } finally {
+          frame.close();
+        }
+      },
+      error: () => {
+        closeVideoDecoder();
+        if (state.mirrorActive && document.getElementById("mirrorMode").value !== "png") {
+          setActionStatus("WebCodecs decode fallback triggered \u2014 switching to PNG mirror");
+          document.getElementById("mirrorMode").value = "png";
+          stopMirror();
+          startMirror();
+        }
+      }
+    });
+    dec.configure({ codec, optimizeForLatency: true });
+    state.videoDecoder = dec;
+    state.mirrorCodec = codec;
+    state.waitKeyframe = true;
+    return true;
+  } catch (_) {
+    closeVideoDecoder();
+    return false;
+  }
+}
+
+async function drawPngChunk(bytes) {
+  if (state.pngDecoding) return;
+  state.pngDecoding = true;
+  try {
+    const blob = new Blob([bytes], { type: "image/png" });
+    if (typeof createImageBitmap === "function") {
+      const bmp = await createImageBitmap(blob);
+      try {
+        if (mirrorCanvas.width !== bmp.width || mirrorCanvas.height !== bmp.height) {
+          mirrorCanvas.width = bmp.width;
+          mirrorCanvas.height = bmp.height;
+        }
+        state.mirrorW = bmp.width;
+        state.mirrorH = bmp.height;
+        mirrorCtx.drawImage(bmp, 0, 0);
+      } finally {
+        bmp.close();
+      }
+    } else {
+      const url = URL.createObjectURL(blob);
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          mirrorCanvas.width = img.naturalWidth;
+          mirrorCanvas.height = img.naturalHeight;
+          state.mirrorW = img.naturalWidth;
+          state.mirrorH = img.naturalHeight;
+          mirrorCtx.drawImage(img, 0, 0);
+          URL.revokeObjectURL(url);
+          resolve();
+        };
+        img.onerror = err => { URL.revokeObjectURL(url); reject(err); };
+        img.src = url;
+      });
+    }
+    const metaEl = document.getElementById("mirrorMeta");
+    if (state.mirrorActive && metaEl && !state.videoDecoder) {
+      metaEl.textContent = `PNG \u00b7 ${state.mirrorW}\u00d7${state.mirrorH}`;
+    }
+  } catch (_) {
+  } finally {
+    state.pngDecoding = false;
+  }
+}
+
+function stopMirror() {
+  if (state.mirrorWs) {
+    const old = state.mirrorWs;
+    state.mirrorWs = null;
+    try { old.close(); } catch (_) {}
+  }
+  closeVideoDecoder();
+  state.mirrorActive = false;
+  state.pngDecoding = false;
+  pad.classList.remove("mirror-live");
+  const btn = document.getElementById("btnMirror");
+  btn.textContent = "Mirror Screen";
+  btn.classList.remove("active");
+  const modeTap = document.getElementById("modeTap");
+  modeTap.disabled = true;
+  if (state.tapMode) setInputMode("drag");
+  updateMirrorStatusUi(state.mirrorInfo);
+}
+
+async function startMirror() {
+  if (state.authBlocked) return;
+  try {
+    const res = await apiFetch("/api/mirror/status");
+    const info = await res.json();
+    updateMirrorStatusUi(info);
+    if (info.state !== "ready") {
+      setActionStatus(info.hint || "ADB device not ready for screen mirroring.", true);
+      return;
+    }
+  } catch (e) {
+    setActionStatus(String(e.message || e), true);
+    return;
+  }
+
+  let reqMode = document.getElementById("mirrorMode").value || "auto";
+  if (reqMode === "auto" && typeof VideoDecoder !== "function") {
+    reqMode = "png";
+    document.getElementById("mirrorMeta").textContent = "PNG Safe (no WebCodecs)";
+  }
+
+  stopMirror();
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws/screen?mode=${encodeURIComponent(reqMode)}`);
+  ws.binaryType = "arraybuffer";
+  state.mirrorWs = ws;
+  state.mirrorActive = true;
+  pad.classList.add("mirror-live");
+  const btn = document.getElementById("btnMirror");
+  btn.textContent = "Stop Mirror";
+  btn.classList.add("active");
+  document.getElementById("modeTap").disabled = false;
+  setActionStatus("Starting live phone screen mirror...");
+
+  ws.onmessage = ev => {
+    if (state.mirrorWs !== ws) return;
+    if (typeof ev.data === "string") {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "error") {
+          setActionStatus(msg.error || "Mirror stream error", true);
+          stopMirror();
+        } else if (msg.type === "meta") {
+          if (msg.width) state.mirrorW = msg.width;
+          if (msg.height) state.mirrorH = msg.height;
+          const dim = (state.mirrorW && state.mirrorH) ? ` \u00b7 ${state.mirrorW}\u00d7${state.mirrorH}` : "";
+          document.getElementById("mirrorMeta").textContent = `${msg.engine === "h264" ? "H.264" : "PNG"}${dim}`;
+          if (msg.engine === "h264" && msg.codec) ensureVideoDecoder(msg.codec);
+        }
+      } catch (_) {}
+      return;
+    }
+
+    const bytes = new Uint8Array(ev.data);
+    if (bytes.length < 2) return;
+    const tag = bytes[0];
+    const payload = bytes.subarray(1);
+    if (tag === 0x03) {
+      drawPngChunk(payload);
+    } else if ((tag === 0x01 || tag === 0x02) && state.videoDecoder && state.videoDecoder.state === "configured") {
+      const isKey = tag === 0x01;
+      if (state.waitKeyframe && !isKey) return;
+      if (!isKey && state.videoDecoder.decodeQueueSize > 3) return;
+      state.waitKeyframe = false;
+      try {
+        state.videoDecoder.decode(new EncodedVideoChunk({
+          type: isKey ? "key" : "delta",
+          timestamp: Math.round(performance.now() * 1000),
+          data: payload
+        }));
+      } catch (_) {}
+    }
+  };
+  ws.onclose = () => {
+    if (state.mirrorWs === ws) stopMirror();
+  };
+}
+
+document.getElementById("btnMirror").onclick = () => {
+  if (state.mirrorActive) stopMirror();
+  else startMirror();
+};
+document.getElementById("mirrorMode").onchange = () => {
+  if (state.mirrorActive) {
+    stopMirror();
+    startMirror();
+  }
+};
+window.addEventListener("beforeunload", stopMirror);
 
 // Live keyboard forwarding
 const SPECIAL_HID = {
@@ -1422,11 +1747,53 @@ function updateMetrics(m) {
   if (!m) return;
   document.getElementById("mMouse").textContent = m.mouse_packets ?? 0;
   document.getElementById("mKeys").textContent = m.key_packets ?? 0;
-  document.getElementById("mLat").textContent = `${m.avg_hid_ms ?? 0} / ${m.last_hid_ms ?? 0} ms`;
+  document.getElementById("mLat").textContent = `${m.avg_hid_ms ?? 0} / ${m.last_hid_ms ?? 0} / ${m.max_hid_ms ?? 0} ms`;
   document.getElementById("mRate").textContent = `${m.events_per_sec ?? 0}/s`;
   document.getElementById("mRec").textContent = m.reconnects ?? 0;
   document.getElementById("mErr").textContent = m.errors ?? 0;
   document.getElementById("mUp").textContent = fmtUptime(m.uptime_sec ?? 0);
+}
+
+function updateMirrorStatusUi(mir) {
+  state.mirrorInfo = mir || null;
+  const pill = document.getElementById("adbPill");
+  const meta = document.getElementById("mirrorMeta");
+  if (!pill) return;
+  if (!mir) {
+    pill.className = "pill";
+    pill.innerHTML = '<span class="dot"></span>Mirror: Unknown';
+    return;
+  }
+  switch (mir.state) {
+    case "ready":
+      pill.className = "pill ok";
+      pill.innerHTML = '<span class="dot"></span>Mirror: Ready';
+      if (!state.mirrorActive && meta) {
+        const dim = (mir.screen_width && mir.screen_height) ? ` (${mir.screen_width}\u00d7${mir.screen_height})` : "";
+        meta.textContent = `ADB Ready${dim}`;
+      }
+      break;
+    case "unauthorized":
+      pill.className = "pill warn";
+      pill.innerHTML = '<span class="dot"></span>Mirror: Approve RSA';
+      if (!state.mirrorActive && meta) meta.textContent = "Approve USB Debugging prompt";
+      break;
+    case "offline":
+      pill.className = "pill warn";
+      pill.innerHTML = '<span class="dot"></span>Mirror: ADB Offline';
+      if (!state.mirrorActive && meta) meta.textContent = "ADB Offline";
+      break;
+    case "no_adb":
+      pill.className = "pill";
+      pill.innerHTML = '<span class="dot"></span>Mirror: No ADB';
+      if (!state.mirrorActive && meta) meta.textContent = "Install host adb for video";
+      break;
+    default:
+      pill.className = "pill";
+      pill.innerHTML = '<span class="dot"></span>Mirror: ADB Off';
+      if (!state.mirrorActive && meta) meta.textContent = "OTG Only (No ADB)";
+      break;
+  }
 }
 
 function appendEvent(ev) {
@@ -1442,6 +1809,7 @@ async function pollStatus() {
     const res = await apiFetch("/api/status");
     const s = await res.json();
     if (s.telemetry) updateMetrics(s.telemetry);
+    if (s.mirror) updateMirrorStatusUi(s.mirror);
     const usbPill = document.getElementById("usbPill");
     const sum = document.getElementById("deviceSummary");
 

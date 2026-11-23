@@ -54,3 +54,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t android-web-otg:ci -f deploy/Dockerfile .
       - run: docker run --rm --entrypoint /usr/local/bin/android-web-otg android-web-otg:ci --help
+      - name: Verify fail-closed non-loopback bind without token
+        run: |
+          set +e
+          docker run --rm android-web-otg:ci
+          rc=$?
+          set -e
+          echo "Exited with code $rc"
+          test "$rc" -eq 2

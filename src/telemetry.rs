@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError, TrySendError};
 use std::sync::Mutex;
 use std::thread::JoinHandle;
@@ -57,10 +57,6 @@ struct InnerState {
     next_id: u64,
     hid_latencies: VecDeque<f64>,
     hid_timestamps: VecDeque<Instant>,
-    mouse_packets: u64,
-    key_packets: u64,
-    reconnects: u64,
-    errors: u64,
     last_hid_ms: f64,
     last_error: Option<String>,
 }
@@ -82,10 +78,14 @@ impl Drop for FileSinkHandle {
     }
 }
 
-/// Thread-safe local telemetry store with ring buffer, broadcast channel, and non-blocking JSONL sink.
+/// Thread-safe local telemetry store with atomic counters, ring buffer, SSE broadcast, and JSONL sink.
 pub struct TelemetryStore {
     inner: Mutex<InnerState>,
     started: Instant,
+    mouse_packets: AtomicU64,
+    key_packets: AtomicU64,
+    reconnects: AtomicU64,
+    errors: AtomicU64,
     ws_clients: AtomicUsize,
     tx: broadcast::Sender<TelemetryEvent>,
     log_tx: Option<SyncSender<String>>,
@@ -142,14 +142,14 @@ impl TelemetryStore {
                 next_id: 1,
                 hid_latencies: VecDeque::with_capacity(100),
                 hid_timestamps: VecDeque::with_capacity(1024),
-                mouse_packets: 0,
-                key_packets: 0,
-                reconnects: 0,
-                errors: 0,
                 last_hid_ms: 0.0,
                 last_error: None,
             }),
             started: Instant::now(),
+            mouse_packets: AtomicU64::new(0),
+            key_packets: AtomicU64::new(0),
+            reconnects: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
             ws_clients: AtomicUsize::new(0),
             tx,
             log_tx,
@@ -184,7 +184,7 @@ impl TelemetryStore {
             let id = st.next_id;
             st.next_id += 1;
             if level == "error" {
-                st.errors += 1;
+                self.errors.fetch_add(1, Ordering::Relaxed);
                 st.last_error = Some(msg.clone());
             }
             let ev = TelemetryEvent {
@@ -218,13 +218,17 @@ impl TelemetryStore {
 
     /// Record a transmitted HID packet (`mouse` or `key`) and its USB round-trip latency in ms.
     pub fn record_hid(&self, kind: &str, duration_ms: f64) {
-        let now = Instant::now();
-        let mut st = self.inner.lock().expect("telemetry mutex poisoned");
         match kind {
-            "mouse" => st.mouse_packets += 1,
-            "key" => st.key_packets += 1,
+            "mouse" => {
+                self.mouse_packets.fetch_add(1, Ordering::Relaxed);
+            }
+            "key" => {
+                self.key_packets.fetch_add(1, Ordering::Relaxed);
+            }
             _ => {}
         }
+        let now = Instant::now();
+        let mut st = self.inner.lock().expect("telemetry mutex poisoned");
         let clamped_ms = duration_ms.max(0.0);
         st.last_hid_ms = clamped_ms;
         if st.hid_latencies.len() == 100 {
@@ -238,8 +242,7 @@ impl TelemetryStore {
     }
 
     pub fn record_reconnect(&self) {
-        let mut st = self.inner.lock().expect("telemetry mutex poisoned");
-        st.reconnects += 1;
+        self.reconnects.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn ws_connected(&self) -> usize {
@@ -285,10 +288,10 @@ impl TelemetryStore {
         };
         TelemetryMetrics {
             uptime_sec: self.started.elapsed().as_secs(),
-            mouse_packets: st.mouse_packets,
-            key_packets: st.key_packets,
-            reconnects: st.reconnects,
-            errors: st.errors,
+            mouse_packets: self.mouse_packets.load(Ordering::Relaxed),
+            key_packets: self.key_packets.load(Ordering::Relaxed),
+            reconnects: self.reconnects.load(Ordering::Relaxed),
+            errors: self.errors.load(Ordering::Relaxed),
             ws_clients: self.ws_clients.load(Ordering::Relaxed),
             last_hid_ms: (st.last_hid_ms * 100.0).round() / 100.0,
             avg_hid_ms,
@@ -387,11 +390,13 @@ mod tests {
             let store = TelemetryStore::new(50, Some(tmp.clone())).unwrap();
             store.record_hid("mouse", 2.0);
             store.record_hid("key", 4.0);
+            store.record_reconnect();
             store.log("ok", "aoa", "attached", None);
 
             let m = store.metrics();
             assert_eq!(m.mouse_packets, 1);
             assert_eq!(m.key_packets, 1);
+            assert_eq!(m.reconnects, 1);
             assert!((m.avg_hid_ms - 3.0).abs() < 0.01);
             assert!((m.max_hid_ms - 4.0).abs() < 0.01);
         }
