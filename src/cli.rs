@@ -100,6 +100,23 @@ impl fmt::Debug for Cli {
     }
 }
 
+/// Minimum accepted length for `--token` / `ANDROID_WEB_OTG_TOKEN`.
+pub const MIN_API_TOKEN_CHARS: usize = 32;
+
+/// Reject an empty or too-short `--token` / `ANDROID_WEB_OTG_TOKEN` before the process binds.
+pub fn validate_api_token(raw: &str) -> Result<(), String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("--token / ANDROID_WEB_OTG_TOKEN must not be empty or whitespace.".into());
+    }
+    if trimmed.chars().count() < MIN_API_TOKEN_CHARS {
+        return Err(format!(
+            "--token / ANDROID_WEB_OTG_TOKEN must be at least {MIN_API_TOKEN_CHARS} characters. Generate one with: openssl rand -hex 32"
+        ));
+    }
+    Ok(())
+}
+
 /// Parse an optional hex USB vendor/product ID (with or without `0x` prefix).
 pub fn parse_hex_id(raw: &str) -> Result<u16, String> {
     let trimmed = raw.trim();
@@ -118,6 +135,17 @@ mod tests {
         assert_eq!(parse_hex_id(" 0X2008 "), Ok(0x2008));
         assert!(parse_hex_id("zzzz").is_err());
         assert!(parse_hex_id("").is_err());
+    }
+
+    #[test]
+    fn api_token_must_be_at_least_32_characters() {
+        let err = validate_api_token(&"a".repeat(31)).expect_err("31 characters must be rejected");
+        assert!(err.contains("32"), "{err}");
+        assert!(err.contains("openssl rand -hex 32"), "{err}");
+        assert!(validate_api_token(&"b".repeat(32)).is_ok());
+        assert!(validate_api_token(&format!("  {}  ", "c".repeat(32))).is_ok());
+        let empty = validate_api_token("   ").expect_err("whitespace token must be rejected");
+        assert!(empty.contains("whitespace"), "{empty}");
     }
 
     #[test]

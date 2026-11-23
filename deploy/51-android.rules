@@ -6,7 +6,30 @@
 SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_MTP_DEVICE}=="1", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 
 # Major Android & AOSP device Vendor IDs (strict 0660 + plugdev + console uaccess)
-SUBSYSTEM=="usb", ATTR{idVendor}=="045e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+# Microsoft VID 045e is limited to Surface Duo Android interfaces. A vendor-wide
+# match also grants Xbox controllers and other Microsoft USB devices.
+# Device idProduct values below are from Microsoft's SurfaceDuoUsb.inf 1.4.137.0
+# (signed 2020-04-22, catalog SurfaceDuoUsb.cat), as published by the driver
+# hardware-id lists:
+#   0c26 Surface Duo ADB (composite ADB is interface MI_01 of this PID)
+#        https://treexy.com/products/driver-fusion/database/universal-serial-bus-devices/microsoft/surface-duo-adb/
+#   0c2e Surface Duo composite ADB MIDI (interface MI_02 of this PID)
+#        https://treexy.com/products/driver-fusion/database/id/usb/vid_045e/pid_0c2e/
+#   0c2f Surface Duo fastboot
+#        https://treexy.com/products/driver-fusion/database/universal-serial-bus-devices/microsoft/surface-duo-fastboot/
+#   0c30 Surface Duo ADB sideload
+#        https://treexy.com/products/driver-fusion/database/universal-serial-bus-devices/microsoft/surface-duo-adb-sideload/
+# The same four device PIDs, plus interface matches 0c28, 0c2a, and 0c2c, are
+# listed for that INF at:
+#   https://driverscatalog.com/de/drivers/download/Surface---USBDevice---1.4.137.0
+# 0c26 is also labeled "Surface Duo" by M0Rf30/android-udev-rules (GPL-3; not copied).
+# Surface Duo 2 PIDs are not in the April 2020 INF. Do not guess them.
+# Uncomment only after the device idProduct is confirmed:
+# SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="PID", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="0c26", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="0c2e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="0c2f", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="0c30", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0489", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0502", MODE="0660", GROUP="plugdev", TAG+="uaccess"

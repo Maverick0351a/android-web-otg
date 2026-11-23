@@ -1,7 +1,8 @@
-use std::collections::VecDeque;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
+use axum::extract::connect_info::ConnectInfo;
 use axum::http::{header, Request, StatusCode};
 use futures_util::future::BoxFuture;
 use http_body_util::BodyExt;
@@ -16,7 +17,10 @@ use android_web_otg::hid::validate_ascii_secret;
 use android_web_otg::mirror::{
     MirrorState, MirrorStatus, MirrorStreamMode, ScreenChunk, ScreenMirrorBackend,
 };
-use android_web_otg::server::{allowed_hosts_for_bind, build_router, AppState};
+use android_web_otg::server::{
+    allowed_hosts_for_bind, build_router, AppState, AuthFailureTracker, Clock, ManualClock,
+    SessionTable, SystemClock,
+};
 use android_web_otg::telemetry::TelemetryStore;
 
 struct MockAoaBridge {
@@ -259,11 +263,46 @@ fn make_app(
         mirror,
         telemetry: tel.clone(),
         token: token.map(|s| Zeroizing::new(s.to_string())),
-        sessions: Mutex::new(VecDeque::new()),
+        sessions: Mutex::new(SessionTable::default()),
+        auth_failures: Mutex::new(AuthFailureTracker::default()),
+        clock: Arc::new(SystemClock),
         allowed_hosts: allowed_hosts_for_bind("127.0.0.1", 8095),
         shutdown_rx,
     });
     (build_router(state), tel, mock, mock_mirror)
+}
+
+fn make_app_with_clock(token: Option<&str>, clock: Arc<ManualClock>) -> axum::Router {
+    let tel = Arc::new(TelemetryStore::new(200, None).unwrap());
+    let mock = Arc::new(MockAoaBridge::new(tel.clone(), None));
+    let bridge: Arc<dyn HidBackend> = mock;
+    let mock_mirror = Arc::new(MockMirrorBackend::new());
+    let mirror: Arc<dyn ScreenMirrorBackend> = mock_mirror;
+    let (_tx, shutdown_rx) = watch::channel(false);
+    let state_clock: Arc<dyn Clock> = clock;
+    let state = Arc::new(AppState {
+        bridge,
+        mirror,
+        telemetry: tel,
+        token: token.map(|s| Zeroizing::new(s.to_string())),
+        sessions: Mutex::new(SessionTable::default()),
+        auth_failures: Mutex::new(AuthFailureTracker::default()),
+        clock: state_clock,
+        allowed_hosts: allowed_hosts_for_bind("127.0.0.1", 8095),
+        shutdown_rx,
+    });
+    build_router(state)
+}
+
+const TEST_API_TOKEN: &str = "test-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn with_peer(mut req: Request<Body>, ip: IpAddr) -> Request<Body> {
+    req.extensions_mut().insert(ConnectInfo(SocketAddr::new(ip, 41234)));
+    req
+}
+
+fn loopback() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::LOCALHOST)
 }
 
 async fn read_json(resp: axum::response::Response) -> Value {
@@ -566,7 +605,7 @@ async fn origin_host_guard_and_cookie_header_auth_enforce_security() {
     // POST /api/auth issues HttpOnly SameSite=Strict session cookie
     let res = app
         .clone()
-        .oneshot(
+        .oneshot(with_peer(
             Request::builder()
                 .method("POST")
                 .uri("/api/auth")
@@ -574,7 +613,8 @@ async fn origin_host_guard_and_cookie_header_auth_enforce_security() {
                 .header("Content-Type", "application/json")
                 .body(Body::from(r#"{"token":"secret-token-abc"}"#))
                 .unwrap(),
-        )
+            loopback(),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -610,4 +650,276 @@ async fn origin_host_guard_and_cookie_header_auth_enforce_security() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+}
+
+fn auth_request(token: &str, peer: IpAddr) -> Request<Body> {
+    with_peer(
+        Request::builder()
+            .method("POST")
+            .uri("/api/auth")
+            .header(header::HOST, "127.0.0.1:8095")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(format!(r#"{{"token":"{token}"}}"#)))
+            .unwrap(),
+        peer,
+    )
+}
+
+async fn post_auth(
+    app: &axum::Router,
+    token: &str,
+    peer: IpAddr,
+    extra: &[(&str, &str)],
+) -> axum::response::Response {
+    let mut req = auth_request(token, peer);
+    for (name, value) in extra {
+        req.headers_mut().insert(
+            axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            axum::http::HeaderValue::from_str(value).unwrap(),
+        );
+    }
+    app.clone().oneshot(req).await.unwrap()
+}
+
+#[tokio::test]
+async fn repeated_failures_from_same_ip_are_rate_limited_other_ips_and_success_are_not() {
+    let (app, _, _, _) = make_app(Some(TEST_API_TOKEN), None);
+    let attacker = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10));
+    let other = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 11));
+
+    for attempt in 1..=5 {
+        let res = post_auth(&app, "wrong-token", attacker, &[]).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "attempt {attempt} should still be 401");
+    }
+
+    // X-Forwarded-For must not select a different bucket than ConnectInfo.
+    let res = post_auth(
+        &app,
+        "wrong-token",
+        attacker,
+        &[("x-forwarded-for", "198.51.100.9"), ("x-forwarded-proto", "https")],
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+    let retry = res.headers().get(header::RETRY_AFTER).expect("Retry-After").to_str().unwrap();
+    assert_eq!(retry, "1", "first lockout uses a 1s exponential backoff base");
+
+    // A different peer is not locked, even if it spoofs the attacker's address.
+    let res = post_auth(&app, "wrong-token", other, &[("x-forwarded-for", "203.0.113.10")]).await;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // A correct token clears the lockout for that IP.
+    let res = post_auth(&app, TEST_API_TOKEN, attacker, &[]).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = post_auth(&app, "wrong-token", attacker, &[]).await;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn auth_cookie_includes_max_age_httponly_and_samesite() {
+    let (app, _, _, _) = make_app(Some(TEST_API_TOKEN), None);
+    let res = post_auth(&app, TEST_API_TOKEN, loopback(), &[]).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let cookie = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+    assert!(cookie.contains("HttpOnly"), "{cookie}");
+    assert!(cookie.contains("SameSite=Strict"), "{cookie}");
+    assert!(cookie.contains("Max-Age=43200"), "{cookie}");
+    assert!(!cookie.split(';').any(|part| part.trim().eq_ignore_ascii_case("secure")), "{cookie}");
+}
+
+#[tokio::test]
+async fn auth_cookie_secure_flag_follows_https_origin_or_loopback_forwarded_proto() {
+    let (app, _, _, _) = make_app(Some(TEST_API_TOKEN), None);
+
+    let res = post_auth(
+        &app,
+        TEST_API_TOKEN,
+        IpAddr::V4(Ipv4Addr::new(203, 0, 113, 20)),
+        &[("origin", "https://127.0.0.1:8095")],
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let cookie = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+    assert!(cookie.split(';').any(|part| part.trim() == "Secure"), "{cookie}");
+
+    let res = post_auth(&app, TEST_API_TOKEN, loopback(), &[("x-forwarded-proto", "https")]).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let cookie = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+    assert!(cookie.split(';').any(|part| part.trim() == "Secure"), "{cookie}");
+
+    let res = post_auth(
+        &app,
+        TEST_API_TOKEN,
+        IpAddr::V4(Ipv4Addr::new(203, 0, 113, 21)),
+        &[("x-forwarded-proto", "https")],
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let cookie = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+    assert!(
+        !cookie.split(';').any(|part| part.trim().eq_ignore_ascii_case("secure")),
+        "non-loopback X-Forwarded-Proto must be ignored: {cookie}"
+    );
+}
+
+#[tokio::test]
+async fn logout_removes_the_session_and_clears_the_cookie() {
+    let (app, _, _, _) = make_app(Some(TEST_API_TOKEN), None);
+    let res = post_auth(&app, TEST_API_TOKEN, loopback(), &[]).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let set_cookie = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+    let cookie_kv = set_cookie.split(';').next().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(with_peer(
+            Request::builder()
+                .method("POST")
+                .uri("/api/logout")
+                .header(header::HOST, "127.0.0.1:8095")
+                .header(header::COOKIE, &cookie_kv)
+                .body(Body::empty())
+                .unwrap(),
+            loopback(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let cleared = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+    assert!(cleared.contains("Max-Age=0"), "{cleared}");
+    assert!(cleared.contains("HttpOnly"), "{cleared}");
+    assert!(cleared.contains("SameSite=Strict"), "{cleared}");
+
+    let res = app
+        .clone()
+        .oneshot(with_peer(
+            Request::builder()
+                .uri("/api/status")
+                .header(header::HOST, "127.0.0.1:8095")
+                .header(header::COOKIE, &cookie_kv)
+                .body(Body::empty())
+                .unwrap(),
+            loopback(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    let html_res = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::HOST, "127.0.0.1:8095")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let html_bytes = html_res.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&html_bytes);
+    assert!(html.contains("btnLogout"));
+    assert!(html.contains("/api/logout"));
+}
+
+async fn login_cookie(app: &axum::Router, peer: IpAddr) -> String {
+    let res = post_auth(app, TEST_API_TOKEN, peer, &[]).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    res.headers()
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string()
+}
+
+async fn status_with(app: &axum::Router, cookie: &str, peer: IpAddr) -> StatusCode {
+    app.clone()
+        .oneshot(with_peer(
+            Request::builder()
+                .uri("/api/status")
+                .header(header::HOST, "127.0.0.1:8095")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+            peer,
+        ))
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn sessions_expire_after_idle_timeout_and_absolute_lifetime() {
+    let peer = loopback();
+    let idle_clock = Arc::new(ManualClock::new());
+    let idle_app = make_app_with_clock(Some(TEST_API_TOKEN), idle_clock.clone());
+    let cookie_a = login_cookie(&idle_app, peer).await;
+    idle_clock.advance(std::time::Duration::from_secs(20 * 60));
+    let cookie_b = login_cookie(&idle_app, peer).await;
+    idle_clock.advance(std::time::Duration::from_secs(20 * 60));
+    assert_eq!(status_with(&idle_app, &cookie_a, peer).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(status_with(&idle_app, &cookie_b, peer).await, StatusCode::OK);
+
+    let absolute_clock = Arc::new(ManualClock::new());
+    let absolute_app = make_app_with_clock(Some(TEST_API_TOKEN), absolute_clock.clone());
+    let cookie = login_cookie(&absolute_app, peer).await;
+    for step in 1..=35 {
+        absolute_clock.advance(std::time::Duration::from_secs(20 * 60));
+        assert_eq!(
+            status_with(&absolute_app, &cookie, peer).await,
+            StatusCode::OK,
+            "session should stay live at 20-minute refresh {step}"
+        );
+    }
+    absolute_clock.advance(std::time::Duration::from_secs(20 * 60));
+    assert_eq!(status_with(&absolute_app, &cookie, peer).await, StatusCode::UNAUTHORIZED);
+
+    let cleared = absolute_app
+        .oneshot(with_peer(
+            Request::builder()
+                .method("POST")
+                .uri("/api/logout")
+                .header(header::HOST, "127.0.0.1:8095")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+            peer,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cleared.status(), StatusCode::OK);
+    let clear_cookie = cleared.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap();
+    assert!(clear_cookie.contains("Max-Age=0"), "{clear_cookie}");
+}
+
+#[test]
+fn udev_microsoft_vid_is_limited_to_surface_duo_pids() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/deploy/51-android.rules");
+    let text = std::fs::read_to_string(path).unwrap();
+    let mtp = r#"SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_MTP_DEVICE}=="1", MODE="0660", GROUP="plugdev", TAG+="uaccess""#;
+    assert!(text.lines().any(|line| line.trim() == mtp), "MTP fallback rule must stay unchanged");
+
+    let active: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && line.contains("045e"))
+        .collect();
+    assert_eq!(active.len(), 4, "expected four Surface Duo PID rules, got {active:?}");
+    for pid in ["0c26", "0c2e", "0c2f", "0c30"] {
+        assert!(
+            active.iter().any(|line| {
+                line.contains(r#"ATTR{idVendor}=="045e""#)
+                    && line.contains(&format!(r#"ATTR{{idProduct}}=="{pid}""#))
+            }),
+            "missing Surface Duo PID {pid}: {active:?}"
+        );
+    }
+    let template = "# SUBSYSTEM==\"usb\", ATTR{idVendor}==\"045e\", ATTR{idProduct}==\"PID\", MODE=\"0660\", GROUP=\"plugdev\", TAG+=\"uaccess\"";
+    assert!(
+        text.lines().any(|line| line.trim() == template),
+        "unverified Microsoft PIDs should remain a commented template"
+    );
 }

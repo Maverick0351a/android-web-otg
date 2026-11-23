@@ -27,5 +27,6 @@ COPY --from=builder /build/android-web-otg /usr/local/bin/android-web-otg
 
 USER otg
 EXPOSE 8095
-# Binds 0.0.0.0:8095 and fails closed unless ANDROID_WEB_OTG_TOKEN is set at runtime.
+# Binds 0.0.0.0:8095 and fails closed unless ANDROID_WEB_OTG_TOKEN is set at runtime
+# to at least 32 characters. Generate one with: openssl rand -hex 32
 ENTRYPOINT ["/usr/local/bin/android-web-otg", "--host", "0.0.0.0", "--port", "8095"]

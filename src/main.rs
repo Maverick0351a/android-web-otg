@@ -1,6 +1,6 @@
 //! Binary entrypoint for `android-web-otg`.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
@@ -12,10 +12,13 @@ use tokio::sync::watch;
 use zeroize::Zeroizing;
 
 use android_web_otg::aoa::{DeviceFilter, HidBackend, NusbAoaBridge};
-use android_web_otg::cli::Cli;
+use android_web_otg::cli::{validate_api_token, Cli};
 use android_web_otg::mcp::run_stdio_mcp;
 use android_web_otg::mirror::{AdbMirrorBackend, ScreenMirrorBackend};
-use android_web_otg::server::{allowed_hosts_for_bind, build_router, validate_bind_auth, AppState};
+use android_web_otg::server::{
+    allowed_hosts_for_bind, build_router, validate_bind_auth, AppState, AuthFailureTracker,
+    SessionTable, SystemClock,
+};
 use android_web_otg::telemetry::TelemetryStore;
 
 async fn shutdown_signal() {
@@ -47,13 +50,11 @@ async fn main() -> ExitCode {
 
     let token = match args.token {
         Some(raw) => {
-            if raw.trim().is_empty() {
-                eprintln!(
-                    "Error: --token / ANDROID_WEB_OTG_TOKEN must not be empty or whitespace."
-                );
+            if let Err(msg) = validate_api_token(&raw) {
+                eprintln!("Error: {msg}");
                 return ExitCode::from(2);
             }
-            Some(Zeroizing::new(raw))
+            Some(Zeroizing::new(raw.trim().to_string()))
         }
         None => None,
     };
@@ -144,7 +145,9 @@ async fn main() -> ExitCode {
         mirror,
         telemetry,
         token,
-        sessions: Mutex::new(VecDeque::new()),
+        sessions: Mutex::new(SessionTable::default()),
+        auth_failures: Mutex::new(AuthFailureTracker::default()),
+        clock: Arc::new(SystemClock),
         allowed_hosts,
         shutdown_rx,
     });
@@ -164,7 +167,7 @@ async fn main() -> ExitCode {
         listener.local_addr().unwrap_or_else(|_| ([127, 0, 0, 1], args.port).into());
     println!("android-web-otg listening on http://{actual_addr}");
 
-    let serve_res = axum::serve(listener, app)
+    let serve_res = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             println!("\nShutting down...");
