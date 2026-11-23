@@ -38,6 +38,7 @@ const MAX_WS_MSG_BYTES: usize = 16 * 1024;
 const SESSION_COOKIE_MAX_AGE_SECS: u64 = 12 * 60 * 60;
 const SESSION_ABSOLUTE_TTL: Duration = Duration::from_secs(SESSION_COOKIE_MAX_AGE_SECS);
 const SESSION_IDLE_TTL: Duration = Duration::from_secs(30 * 60);
+const SESSION_WATCH_INTERVAL: Duration = Duration::from_secs(5);
 const AUTH_FREE_FAILURES: u32 = 5;
 const AUTH_BACKOFF_BASE_SECS: u64 = 1;
 const AUTH_BACKOFF_MAX_SECS: u64 = 15 * 60;
@@ -461,17 +462,8 @@ fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<()> {
     let Some(ref expected) = state.token else {
         return Ok(());
     };
-    if let Some(hdr) = headers.get("x-auth-token").and_then(|v| v.to_str().ok()) {
-        if ct_eq_str(hdr, expected) {
-            return Ok(());
-        }
-    }
-    if let Some(auth) = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
-        if let Some(bearer) = auth.strip_prefix("Bearer ") {
-            if ct_eq_str(bearer.trim(), expected) {
-                return Ok(());
-            }
-        }
+    if presented_long_lived_token(expected, headers) {
+        return Ok(());
     }
     if let Some(cookie_val) = extract_cookie(headers, SESSION_COOKIE_NAME) {
         let now = state.clock.now();
@@ -512,6 +504,63 @@ impl SessionTable {
     fn remove_token(&mut self, cookie: &str) {
         self.records.retain(|session| !ct_eq_str(cookie, &session.token));
     }
+
+    /// True when `cookie` matches a session that is still inside both lifetimes.
+    /// Does not extend the idle timer.
+    fn contains_live(&mut self, cookie: &str, now: Instant) -> bool {
+        let Some(index) = self.records.iter().position(|session| ct_eq_str(cookie, &session.token))
+        else {
+            return false;
+        };
+        if session_is_live(&self.records[index], now) {
+            return true;
+        }
+        self.records.remove(index);
+        false
+    }
+}
+
+fn presented_long_lived_token(expected: &str, headers: &HeaderMap) -> bool {
+    if let Some(hdr) = headers.get("x-auth-token").and_then(|value| value.to_str().ok()) {
+        if ct_eq_str(hdr, expected) {
+            return true;
+        }
+    }
+    if let Some(auth) = headers.get(header::AUTHORIZATION).and_then(|value| value.to_str().ok()) {
+        if let Some(bearer) = auth.strip_prefix("Bearer ") {
+            return ct_eq_str(bearer.trim(), expected);
+        }
+    }
+    false
+}
+
+/// Session cookie a long-lived socket must keep re-checking.
+///
+/// A matching `X-Auth-Token` or bearer token is not a session, so those
+/// connections are not tied to idle or absolute expiry. When no API token is
+/// configured there is nothing to expire.
+fn session_binding(token: Option<&str>, headers: &HeaderMap) -> Option<String> {
+    let expected = token?;
+    if presented_long_lived_token(expected, headers) {
+        return None;
+    }
+    extract_cookie(headers, SESSION_COOKIE_NAME).map(str::to_string)
+}
+
+fn session_still_current(state: &AppState, cookie: Option<&str>) -> bool {
+    let Some(cookie) = cookie else {
+        return true;
+    };
+    let now = state.clock.now();
+    state.sessions.lock().expect("sessions mutex poisoned").contains_live(cookie, now)
+}
+
+fn note_session_activity(state: &AppState, cookie: Option<&str>) -> bool {
+    let Some(cookie) = cookie else {
+        return true;
+    };
+    let now = state.clock.now();
+    state.sessions.lock().expect("sessions mutex poisoned").authenticate(cookie, now)
 }
 
 fn request_is_https(headers: &HeaderMap, peer: IpAddr) -> bool {
@@ -819,6 +868,8 @@ struct SseState {
     last_sent_id: u64,
     rx: BroadcastStream<TelemetryEvent>,
     shutdown_rx: watch::Receiver<bool>,
+    app: Arc<AppState>,
+    session: Option<String>,
 }
 
 fn format_sse_event(ev: &TelemetryEvent) -> Option<Event> {
@@ -843,11 +894,17 @@ async fn stream_telemetry(
         VecDeque::new()
     };
 
-    let init =
-        SseState { backlog, last_sent_id: last_id, rx, shutdown_rx: state.shutdown_rx.clone() };
+    let init = SseState {
+        backlog,
+        last_sent_id: last_id,
+        rx,
+        shutdown_rx: state.shutdown_rx.clone(),
+        session: session_binding(state.token.as_deref().map(String::as_str), &headers),
+        app: state,
+    };
 
     let stream = stream::unfold(init, |mut st| async move {
-        if *st.shutdown_rx.borrow() {
+        if *st.shutdown_rx.borrow() || !session_still_current(&st.app, st.session.as_deref()) {
             return None;
         }
         while let Some(ev) = st.backlog.pop_front() {
@@ -863,6 +920,12 @@ async fn stream_telemetry(
                 biased;
                 _ = st.shutdown_rx.changed() => {
                     return None;
+                }
+                () = tokio::time::sleep(SESSION_WATCH_INTERVAL) => {
+                    if !session_still_current(&st.app, st.session.as_deref()) {
+                        return None;
+                    }
+                    continue;
                 }
                 maybe_msg = st.rx.next() => {
                     match maybe_msg {
@@ -983,8 +1046,14 @@ impl Drop for WsGuard {
     }
 }
 
-async fn ws_hid(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    ws.max_message_size(MAX_WS_MSG_BYTES).on_upgrade(move |socket| handle_ws_hid(socket, state))
+async fn ws_hid(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let session = session_binding(state.token.as_deref().map(String::as_str), &headers);
+    ws.max_message_size(MAX_WS_MSG_BYTES)
+        .on_upgrade(move |socket| handle_ws_hid(socket, state, session))
 }
 
 async fn send_ws_err(socket: &mut WebSocket, err: &AppError) {
@@ -993,7 +1062,7 @@ async fn send_ws_err(socket: &mut WebSocket, err: &AppError) {
         .await;
 }
 
-async fn handle_ws_hid(mut socket: WebSocket, state: Arc<AppState>) {
+async fn handle_ws_hid(mut socket: WebSocket, state: Arc<AppState>, session: Option<String>) {
     let active = state.telemetry.ws_connected();
     state.telemetry.log(
         "ok",
@@ -1003,9 +1072,11 @@ async fn handle_ws_hid(mut socket: WebSocket, state: Arc<AppState>) {
     );
     let _guard = WsGuard(state.telemetry.clone());
     let mut shutdown_rx = state.shutdown_rx.clone();
+    let mut session_watch = tokio::time::interval(SESSION_WATCH_INTERVAL);
+    session_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
-        if *shutdown_rx.borrow() {
+        if *shutdown_rx.borrow() || !session_still_current(&state, session.as_deref()) {
             let _ = socket.close().await;
             break;
         }
@@ -1015,11 +1086,16 @@ async fn handle_ws_hid(mut socket: WebSocket, state: Arc<AppState>) {
                 let _ = socket.close().await;
                 break;
             }
+            _ = session_watch.tick() => continue,
             incoming = socket.recv() => incoming,
         };
         let Some(Ok(msg)) = next_msg else {
             break;
         };
+        if !note_session_activity(&state, session.as_deref()) {
+            let _ = socket.close().await;
+            break;
+        }
         match msg {
             Message::Text(txt) => match serde_json::from_str::<WsHidCmd>(&txt) {
                 Ok(WsHidCmd::Ping) => {
@@ -1064,14 +1140,21 @@ async fn handle_ws_hid(mut socket: WebSocket, state: Arc<AppState>) {
 async fn ws_screen(
     ws: WebSocketUpgrade,
     Query(q): Query<ScreenWsQuery>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let mode = MirrorStreamMode::from_query(q.mode.as_deref());
+    let session = session_binding(state.token.as_deref().map(String::as_str), &headers);
     ws.max_message_size(MAX_WS_MSG_BYTES)
-        .on_upgrade(move |socket| handle_ws_screen(socket, state, mode))
+        .on_upgrade(move |socket| handle_ws_screen(socket, state, mode, session))
 }
 
-async fn handle_ws_screen(mut socket: WebSocket, state: Arc<AppState>, mode: MirrorStreamMode) {
+async fn handle_ws_screen(
+    mut socket: WebSocket,
+    state: Arc<AppState>,
+    mode: MirrorStreamMode,
+    session: Option<String>,
+) {
     let mut rx = match state
         .mirror
         .spawn_stream(preferred_usb_serial(&state), mode, state.shutdown_rx.clone())
@@ -1090,8 +1173,10 @@ async fn handle_ws_screen(mut socket: WebSocket, state: Arc<AppState>, mode: Mir
     };
 
     let mut shutdown_rx = state.shutdown_rx.clone();
+    let mut session_watch = tokio::time::interval(SESSION_WATCH_INTERVAL);
+    session_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        if *shutdown_rx.borrow() {
+        if *shutdown_rx.borrow() || !session_still_current(&state, session.as_deref()) {
             let _ = socket.close().await;
             break;
         }
@@ -1101,7 +1186,12 @@ async fn handle_ws_screen(mut socket: WebSocket, state: Arc<AppState>, mode: Mir
                 let _ = socket.close().await;
                 break;
             }
+            _ = session_watch.tick() => continue,
             maybe_chunk = rx.recv() => {
+                if !session_still_current(&state, session.as_deref()) {
+                    let _ = socket.close().await;
+                    break;
+                }
                 let Some(chunk) = maybe_chunk else {
                     let _ = socket.close().await;
                     break;
@@ -1141,7 +1231,12 @@ async fn handle_ws_screen(mut socket: WebSocket, state: Arc<AppState>, mode: Mir
             incoming = socket.recv() => {
                 match incoming {
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
-                    Some(Ok(_)) => {}
+                    Some(Ok(_)) => {
+                        if !note_session_activity(&state, session.as_deref()) {
+                            let _ = socket.close().await;
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -1220,5 +1315,35 @@ mod tests {
         };
         assert!(session_is_live(&active, active.last_seen));
         assert!(!session_is_live(&active, created + SESSION_ABSOLUTE_TTL));
+    }
+
+    #[test]
+    fn bearer_sockets_are_not_session_bound_and_cookie_sockets_are() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, HeaderValue::from_static("otg_session=abc"));
+        assert_eq!(session_binding(None, &headers), None);
+        let token = "test-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        headers.insert("x-auth-token", HeaderValue::from_static(token));
+        assert_eq!(session_binding(Some(token), &headers), None);
+        headers.remove("x-auth-token");
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static(concat!(
+                "Bearer ",
+                "test-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            )),
+        );
+        assert_eq!(session_binding(Some(token), &headers), None);
+        headers.remove(header::AUTHORIZATION);
+        assert_eq!(session_binding(Some(token), &headers).as_deref(), Some("abc"));
+
+        let created = Instant::now();
+        let mut table = SessionTable::default();
+        table.insert(SessionRecord { token: "abc".into(), created, last_seen: created });
+        assert!(table.contains_live("abc", created + Duration::from_secs(29 * 60)));
+        assert!(!table.contains_live("abc", created + Duration::from_secs(30 * 60)));
+        table.insert(SessionRecord { token: "abc".into(), created, last_seen: created });
+        table.remove_token("abc");
+        assert!(!table.contains_live("abc", created));
     }
 }

@@ -917,8 +917,9 @@ fn udev_microsoft_vid_is_limited_to_surface_duo_pids() {
             "missing Surface Duo PID {pid}: {active:?}"
         );
     }
+    let template = "# SUBSYSTEM==\"usb\", ATTR{idVendor}==\"045e\", ATTR{idProduct}==\"PID\", MODE=\"0660\", GROUP=\"plugdev\", TAG+=\"uaccess\"";
     assert!(
-        text.lines().any(|line| line.trim_start().starts_with('#') && line.contains("PID")),
+        text.lines().any(|line| line.trim() == template),
         "unverified Microsoft PIDs should remain a commented template"
     );
 }

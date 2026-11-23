@@ -235,8 +235,8 @@ android-web-otg --auto-unlock --unlock-wake swipe
 **Windows (PowerShell):**
 
 ```powershell
-# At least 32 characters. Generate one with: openssl rand -hex 32
-$env:ANDROID_WEB_OTG_TOKEN = "replace-with-strong-random-token"
+# Must be at least 32 characters or startup exits 2. Generate one with: openssl rand -hex 32
+$env:ANDROID_WEB_OTG_TOKEN = "too-short-replace-me"
 .\android-web-otg.exe --host <tailscale-or-lan-ip> --port 8095
 
 $env:ANDROID_WEB_OTG_UNLOCK_CODE = "1234"
