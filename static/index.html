@@ -653,6 +653,7 @@
       <button id="btnHelp" type="button">? Guide</button>
       <button id="btnSpecs" type="button">Phone Specs</button>
       <button id="btnReconnect" class="primary" type="button">Reconnect USB</button>
+      <button id="btnLogout" class="sm" type="button" hidden>Log out</button>
     </div>
   </div>
 
@@ -1677,6 +1678,16 @@ async function submitAuth() {
   }
 }
 document.getElementById("btnAuthSubmit").onclick = submitAuth;
+document.getElementById("btnLogout").onclick = async () => {
+  const btn = document.getElementById("btnLogout");
+  if (btn) btn.hidden = true;
+  try {
+    await fetch("/api/logout", { method: "POST" });
+  } catch (_) {}
+  pauseLiveStreams();
+  const modal = document.getElementById("authModal");
+  if (modal) modal.classList.add("open");
+};
 document.getElementById("authInput").addEventListener("keydown", e => {
   if (e.key === "Enter") { e.preventDefault(); submitAuth(); }
 });
@@ -1837,6 +1848,8 @@ async function pollStatus() {
     }
 
     document.getElementById("btnSendPreset").style.display = s.unlock_preset_configured ? "inline-block" : "none";
+    const logoutBtn = document.getElementById("btnLogout");
+    if (logoutBtn) logoutBtn.hidden = !s.auth_required;
   } catch (_) {}
 }
 

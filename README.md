@@ -219,8 +219,9 @@ By default `android-web-otg` binds to `--host 127.0.0.1 --port 8095`.
 **macOS / Linux (bash/zsh):**
 
 ```bash
-# Bind to a private VPN/Tailscale or LAN IP (token is REQUIRED when non-loopback; open TCP 8095 in firewall)
-export ANDROID_WEB_OTG_TOKEN="replace-with-strong-random-token"
+# Bind to a private VPN/Tailscale or LAN IP (token is REQUIRED when non-loopback; open TCP 8095 in firewall).
+# The token must be at least 32 characters. `openssl rand -hex 32` prints a 64-character token.
+export ANDROID_WEB_OTG_TOKEN="$(openssl rand -hex 32)"
 android-web-otg --host <tailscale-or-lan-ip> --port 8095
 
 # Pin by USB serial or VID/PID, ignore an unrelated USB device, set custom adb, and save JSONL telemetry
@@ -234,6 +235,7 @@ android-web-otg --auto-unlock --unlock-wake swipe
 **Windows (PowerShell):**
 
 ```powershell
+# At least 32 characters. Generate one with: openssl rand -hex 32
 $env:ANDROID_WEB_OTG_TOKEN = "replace-with-strong-random-token"
 .\android-web-otg.exe --host <tailscale-or-lan-ip> --port 8095
 
@@ -280,7 +282,7 @@ Verified live (Linux Docker host + pure-Rust `v0.1` core) against a physical bro
     --device-cgroup-rule='c 189:* rmw' \
     -v /dev/bus/usb:/dev/bus/usb \
     ${PLUGDEV_GID:+--group-add "$PLUGDEV_GID"} \
-    -e ANDROID_WEB_OTG_TOKEN="replace-with-strong-random-token" \
+    -e ANDROID_WEB_OTG_TOKEN="$(openssl rand -hex 32)" \
     ghcr.io/maverick0351a/android-web-otg:latest
 
   # Or override entrypoint for loopback-only testing without --token:
@@ -301,7 +303,9 @@ Verified live (Linux Docker host + pure-Rust `v0.1` core) against a physical bro
 > Because `android-web-otg` injects real physical keyboard and mouse HID events into any matched Android device over USB, **never expose it on an untrusted LAN or the public internet without a strong `--token` and firewall/VPN isolation**.
 
 - **Fail-closed non-loopback binds:** Starting HTTP mode on any non-loopback `--host` (such as `0.0.0.0`, `::`, or a LAN/VPN IP) without a non-empty `--token` / `ANDROID_WEB_OTG_TOKEN` **exits immediately with status code `2`** before touching USB (`validate_bind_auth` in `src/server.rs`).
-- **Session cookie & header auth:** `POST /api/auth` validates the token using constant-time comparison (`subtle`) and issues an `HttpOnly; SameSite=Strict` CSPRNG session cookie. Query-string `?token=` URL parameters are rejected to keep credentials out of browser history and logs.
+- **Minimum token length:** When `--token` / `ANDROID_WEB_OTG_TOKEN` is set, it must be at least 32 characters or the process exits with status `2` before binding. Generate one with `openssl rand -hex 32`.
+- **Login backoff:** After 5 failed `POST /api/auth` attempts from the same TCP peer, further failures from that IP return `429` with `Retry-After` (exponential backoff starting at 1 second, capped at 15 minutes). The address comes from `ConnectInfo`, never `X-Forwarded-For`. A successful login clears that IP. The in-memory map keeps at most 1024 addresses.
+- **Session cookie & header auth:** `POST /api/auth` validates the token using constant-time comparison (`subtle`) and issues an `HttpOnly; SameSite=Strict; Max-Age=43200` CSPRNG session cookie. `Secure` is set when the `Origin` is `https`, or when `X-Forwarded-Proto` is `https` and the TCP peer is loopback. The server enforces a 12-hour absolute lifetime and a 30-minute idle timeout in `check_auth`, not only via the cookie. `POST /api/logout` deletes the session and clears the cookie. Query-string `?token=` URL parameters are rejected to keep credentials out of browser history and logs.
 - **DNS rebinding & CSWSH defense:** On loopback binds (`127.0.0.0/8`, `localhost`, `::1`), `/api/*` and `/ws/*` enforce a strict `Host` allowlist (`allowed_hosts_for_bind`). When `Origin` or `Sec-Fetch-Site` headers are present they are verified as same-origin, and WebSocket upgrades on both `/ws/hid` and `/ws/screen` strictly require a matching `Origin` header.
 - **Secret isolation:** Manual unlock codes and `ANDROID_WEB_OTG_UNLOCK_CODE` are ASCII-validated, normalized, wrapped in `Zeroizing`, excluded from `localStorage`, JSON responses, telemetry logs, and omitted from MCP tool schemas.
 
