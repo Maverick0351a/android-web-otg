@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo.svg" alt="android-web-otg logo" width="136" />
+  <img src="docs/logo.svg" alt="android-web-otg logo" width="108" />
   <h1>android-web-otg</h1>
   <p><sub><strong>by Oscillink</strong></sub></p>
   <p>
@@ -7,12 +7,12 @@
     Pure Rust for <strong>Linux, macOS, and Windows</strong> — zero <code>adb</code>, zero <code>libusb</code>, and <strong>no separate Linux box required</strong>.
   </p>
   <p>
-    <a href="https://github.com/Maverick0351a/android-web-otg/actions/workflows/ci.yml"><img src="https://github.com/Maverick0351a/android-web-otg/actions/workflows/ci.yml/badge.svg?style=flat-square" alt="CI" /></a>
-    <img src="https://img.shields.io/badge/Rust-1.85%2B-ef233c?style=flat-square&logo=rust&logoColor=white&labelColor=0a0a0d" alt="Rust 1.85+" />
-    <img src="https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-d4d4d8?style=flat-square&labelColor=0a0a0d" alt="Platforms" />
-    <img src="https://img.shields.io/badge/Protocol-AOAv2%20HID-ef233c?style=flat-square&labelColor=0a0a0d" alt="AOAv2 HID" />
-    <img src="https://img.shields.io/badge/by-Oscillink-7f0d1d?style=flat-square&labelColor=0a0a0d" alt="by Oscillink" />
-    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square&labelColor=0a0a0d" alt="MIT License" /></a>
+    <a href="https://github.com/Maverick0351a/android-web-otg/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Maverick0351a/android-web-otg/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI&labelColor=0a0a0d" alt="CI Status" height="18" /></a>
+    <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-1.85%2B-ef233c?style=flat-square&logo=rust&logoColor=white&labelColor=0a0a0d" alt="Rust 1.85+" height="18" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/Maverick0351a/android-web-otg?style=flat-square&label=License&labelColor=0a0a0d&color=22c55e" alt="License" height="18" /></a>
+    <img src="https://img.shields.io/badge/OS-Linux%20%C2%B7%20macOS%20%C2%B7%20Win-3f3f46?style=flat-square&labelColor=0a0a0d" alt="OS Support" height="18" />
+    <img src="https://img.shields.io/badge/USB-AOAv2%20HID-ef233c?style=flat-square&logo=android&logoColor=white&labelColor=0a0a0d" alt="USB AOAv2 HID" height="18" />
+    <img src="docs/badge-gemini.svg" alt="Forged by Gemini 4 Neon" height="18" />
   </p>
   <p>
     <a href="#demo--screenshots">Demo</a> &middot;
@@ -188,6 +188,6 @@ Advanced post-ADB orchestration — including multi-device switching, `scrcpy-se
 ---
 
 <div align="center">
-  <img src="docs/oscillink-logo.svg" alt="Oscillink" width="180" />
+  <img src="docs/oscillink-logo.svg" alt="Oscillink" width="136" />
   <p>Built by <strong>Oscillink</strong> &middot; <a href="LICENSE">MIT License</a></p>
 </div>
