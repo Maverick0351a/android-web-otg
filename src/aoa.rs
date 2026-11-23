@@ -226,6 +226,44 @@ impl UsbTransport for ControlHandle {
     }
 }
 
+/// Formats OS-specific permission or USB driver remediation hints on open/claim failures.
+pub(crate) fn format_usb_open_hint(os: &str, vid: u16, pid: u16, raw_err: &str) -> String {
+    let lower = raw_err.to_ascii_lowercase();
+    match os {
+        "linux"
+            if lower.contains("permission")
+                || lower.contains("denied")
+                || lower.contains("eacces") =>
+        {
+            format!(
+                "USB {vid:04x}:{pid:04x}: permission denied — install deploy/51-android.rules (udev) and join plugdev (or use console uaccess): {raw_err}"
+            )
+        }
+        "windows"
+            if lower.contains("winusb")
+                || lower.contains("access")
+                || lower.contains("denied")
+                || lower.contains("claim")
+                || lower.contains("not supported") =>
+        {
+            format!(
+                "USB {vid:04x}:{pid:04x}: Windows inbox MTP driver blocked EP0 — bind WinUSB via Zadig or attach via WSL2 + usbipd-win ({raw_err})"
+            )
+        }
+        "macos"
+            if lower.contains("exclusive")
+                || lower.contains("access")
+                || lower.contains("busy")
+                || lower.contains("privilege") =>
+        {
+            format!(
+                "USB {vid:04x}:{pid:04x}: device busy or blocked on macOS — close Android File Transfer / OpenMTP / adb and retry ({raw_err})"
+            )
+        }
+        _ => format!("USB {vid:04x}:{pid:04x}: {raw_err}"),
+    }
+}
+
 /// Compute safe EP0 chunk size (`<= 63` bytes) honoring USB 3.0 exponent encoding of `bMaxPacketSize0`.
 #[must_use]
 pub fn aoa_hid_chunk_size(usb_version: u16, max_pkt0: u8) -> usize {
@@ -841,14 +879,15 @@ impl AoaActor {
             let dev = match dev_info.open().await {
                 Ok(d) => d,
                 Err(e) => {
-                    last_err = Some(format!("USB {vid:04x}:{pid:04x}: {e}"));
+                    last_err =
+                        Some(format_usb_open_hint(std::env::consts::OS, vid, pid, &e.to_string()));
                     continue;
                 }
             };
             let ctrl: Arc<dyn UsbTransport> = match Self::open_control(&dev).await {
                 Ok(c) => Arc::new(c),
                 Err(e) => {
-                    last_err = Some(format!("USB {vid:04x}:{pid:04x}: {e}"));
+                    last_err = Some(format_usb_open_hint(std::env::consts::OS, vid, pid, &e));
                     continue;
                 }
             };
@@ -1496,6 +1535,23 @@ mod tests {
             rec[3],
             RecordedOut { request: ACCESSORY_UNREGISTER_HID, value: 2, index: 0, len: 0 }
         );
+    }
+
+    #[test]
+    fn usb_open_hints_are_actionable_per_os() {
+        let linux = format_usb_open_hint("linux", 0x0e8d, 0x2008, "Permission denied (EACCES)");
+        assert!(linux.contains("51-android.rules"));
+        assert!(linux.contains("plugdev"));
+
+        let win = format_usb_open_hint("windows", 0x0e8d, 0x2008, "claim WinUSB interface failed");
+        assert!(win.contains("Zadig"));
+        assert!(win.contains("usbipd-win"));
+
+        let mac = format_usb_open_hint("macos", 0x18d1, 0x4ee7, "Exclusive access busy");
+        assert!(mac.contains("OpenMTP"));
+
+        let other = format_usb_open_hint("freebsd", 0x18d1, 0x4ee7, "timeout");
+        assert_eq!(other, "USB 18d1:4ee7: timeout");
     }
 
     #[tokio::test]

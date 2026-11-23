@@ -43,10 +43,15 @@ Verified live against a physical broken-screen Android phone (**`PCD Bengal Max`
 - **Masked Quick Unlock / Auto-Insert:** Optional sidebar unlock panel and single-shot USB-attach auto-insert (`ANDROID_WEB_OTG_UNLOCK_CODE` + `--auto-unlock`), logging character counts only (`zeroize` memory scrubbing; secrets never touch disk, URLs, or telemetry).
 - **Non-blocking Telemetry & SSE Stream:** Lock-free atomic packet counters, HID round-trip latency (`avg` / `last` / `max`), bounded ring buffer (`/api/telemetry/stream` SSE with `Last-Event-ID`), optional background-thread JSONL logging (`--log-file`), and 1-click JSONL export.
 
-## Prerequisites
+## Cross-Platform Support, Permissions & Drivers
 
-- **Linux host (recommended):** Grant non-root `plugdev` / console `uaccess` access to USB device nodes via [deploy/51-android.rules](deploy/51-android.rules) (`MODE="0660", GROUP="plugdev", TAG+="uaccess"`).
-- **Windows hosts:** `nusb` attempts automatic composite interface fallback, though Android devices held exclusively by `WUDFWpdMtp` may still need a WinUSB interface binding; Linux hosts detach/share EP0 seamlessly out of the box.
+`android-web-otg` runs locally on the same computer where the phone is plugged in (`http://127.0.0.1:8095`) — **no separate Linux server is required**. Pure-Rust `nusb` provides the cross-OS USB transport adapter natively (`usbfs` on Linux, `IOKit` on macOS, `WinUSB` on Windows) with **zero `libusb` install**.
+
+- **Linux (desktop, laptop, Raspberry Pi, headless server — plug & play):** Install [deploy/51-android.rules](deploy/51-android.rules) (`MODE="0660", GROUP="plugdev", TAG+="uaccess"` — covers major Android OEM VIDs plus any `ID_MTP_DEVICE`), reload udev, and join `plugdev` (or run from a local console session / rootless Docker). Linux accesses EP0 directly without detaching MTP or ADB.
+- **Windows:**
+  - **Option A — WSL2 + `usbipd-win` (recommended, zero Zadig):** Run `usbipd bind` and `usbipd attach --wsl` once, then run the Linux binary inside WSL2 with full native `usbfs` EP0 support and intact Windows MTP drivers.
+  - **Option B — Native `android-web-otg.exe`:** Automatically probes all composite interfaces (preferring `0xFF` WinUSB). If Windows's built-in `WUDFWpdMtp` driver blocks raw EP0 transfers, bind `WinUSB` with Zadig (the same Windows kernel restriction as `scrcpy --otg`).
+- **macOS (`aarch64-apple-darwin`):** Connects via `nusb` `IOKit` natively — ensure exclusive MTP utilities (Android File Transfer, OpenMTP) or `adb` aren't locking the interface if connection fails.
 
 ## Quickstart
 
