@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 280" width="380" height="280" role="img" aria-label="Oscillink">
+  <defs>
+    <linearGradient id="oscObsidian" x1="88" y1="22" x2="292" y2="258" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#14141d"/>
+      <stop offset="52%" stop-color="#07070c"/>
+      <stop offset="100%" stop-color="#20060f"/>
+    </linearGradient>
+    <linearGradient id="oscCrimson" x1="120" y1="42" x2="260" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff4d6d"/>
+      <stop offset="50%" stop-color="#ef233c"/>
+      <stop offset="100%" stop-color="#b4162e"/>
+    </linearGradient>
+    <linearGradient id="oscRim" x1="88" y1="22" x2="292" y2="258" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f4f4f6"/>
+      <stop offset="55%" stop-color="#d4d4d8"/>
+      <stop offset="100%" stop-color="#ef233c"/>
+    </linearGradient>
+    <clipPath id="hexInnerClip">
+      <polygon points="190,34 279,84 279,196 190,246 101,196 101,84"/>
+    </clipPath>
+    <clipPath id="topHalfClip">
+      <rect x="60" y="10" width="260" height="104"/>
+    </clipPath>
+    <clipPath id="botHalfClip">
+      <rect x="60" y="166" width="260" height="104"/>
+    </clipPath>
+  </defs>
+
+  <!-- Outer Volcanic Obsidian Hexagonal Shield (top half) -->
+  <g clip-path="url(#topHalfClip)">
+    <path d="M190,18 L289,74 Q295,78 295,85 L295,195 Q295,202 289,206 L195,259 Q190,262 185,259 L91,206 Q85,202 85,195 L85,85 Q85,78 91,74 L185,18 Q190,15 195,18 Z"
+          fill="url(#oscObsidian)" stroke="url(#oscRim)" stroke-width="11" stroke-linejoin="round"/>
+    <!-- Inner molten crimson rim -->
+    <polygon points="190,32 281,83 281,197 190,248 99,197 99,83" fill="none" stroke="#ef233c" stroke-opacity="0.48" stroke-width="1.6"/>
+    <!-- Top apex rivet dot -->
+    <circle cx="190" cy="19" r="2.6" fill="#07070c"/>
+  </g>
+
+  <!-- Outer Volcanic Obsidian Hexagonal Shield (bottom half) -->
+  <g clip-path="url(#botHalfClip)">
+    <path d="M190,18 L289,74 Q295,78 295,85 L295,195 Q295,202 289,206 L195,259 Q190,262 185,259 L91,206 Q85,202 85,195 L85,85 Q85,78 91,74 L185,18 Q190,15 195,18 Z"
+          fill="url(#oscObsidian)" stroke="url(#oscRim)" stroke-width="11" stroke-linejoin="round"/>
+    <polygon points="190,32 281,83 281,197 190,248 99,197 99,83" fill="none" stroke="#ef233c" stroke-opacity="0.48" stroke-width="1.6"/>
+    <!-- Signature recessed slot accent along bottom-left frame edge -->
+    <line x1="103" y1="213" x2="174" y2="253" stroke="#07070c" stroke-width="3.6" stroke-linecap="round"/>
+    <!-- Bottom apex rivet dot -->
+    <circle cx="190" cy="260" r="2.6" fill="#07070c"/>
+  </g>
+
+  <!-- Symmetric Top & Bottom PCB Traces -->
+  <g clip-path="url(#hexInnerClip)">
+    <!-- TOP HALF PCB -->
+    <g clip-path="url(#topHalfClip)">
+      <!-- Central split molten-crimson Y-bus -->
+      <path d="M180,36 V74 L148,108 L148,116 L166,116 L190,91 L214,116 L232,116 L232,108 L200,74 V36 Z" fill="url(#oscCrimson)"/>
+      <!-- Center vertical split notch -->
+      <rect x="188.2" y="34" width="3.6" height="32" rx="1.8" fill="#07070c"/>
+      <!-- Flanking molten-crimson angled pads -->
+      <path d="M101,105 L122,93 Q131,89 135,96 Q138,103 130,108 L113,118 Z" fill="url(#oscCrimson)"/>
+      <path d="M279,105 L258,93 Q249,89 245,96 Q242,103 250,108 L267,118 Z" fill="url(#oscCrimson)"/>
+      <!-- Brushed-titanium PCB trace lines & circular via terminals -->
+      <polyline points="179,40 134,66 134,90 156,90" fill="none" stroke="#f4f4f6" stroke-width="2.4" stroke-linejoin="round"/>
+      <polyline points="201,40 246,66 246,90 224,90" fill="none" stroke="#f4f4f6" stroke-width="2.4" stroke-linejoin="round"/>
+      <polyline points="103,115 117,107" fill="none" stroke="#d4d4d8" stroke-width="2.2" stroke-linecap="round"/>
+      <polyline points="277,115 263,107" fill="none" stroke="#d4d4d8" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="159" cy="90" r="4.2" fill="#07070c" stroke="#f4f4f6" stroke-width="2.2"/>
+      <circle cx="221" cy="90" r="4.2" fill="#07070c" stroke="#f4f4f6" stroke-width="2.2"/>
+    </g>
+
+    <!-- BOTTOM HALF PCB (vertical mirror of top) -->
+    <g clip-path="url(#botHalfClip)">
+      <path d="M180,244 V206 L148,172 L148,164 L166,164 L190,189 L214,164 L232,164 L232,172 L200,206 V244 Z" fill="url(#oscCrimson)"/>
+      <rect x="188.2" y="214" width="3.6" height="32" rx="1.8" fill="#07070c"/>
+      <path d="M101,175 L122,187 Q131,191 135,184 Q138,177 130,172 L113,162 Z" fill="url(#oscCrimson)"/>
+      <path d="M279,175 L258,187 Q249,191 245,184 Q242,177 250,172 L267,162 Z" fill="url(#oscCrimson)"/>
+      <polyline points="179,240 134,214 134,190 156,190" fill="none" stroke="#f4f4f6" stroke-width="2.4" stroke-linejoin="round"/>
+      <polyline points="201,240 246,214 246,190 224,190" fill="none" stroke="#f4f4f6" stroke-width="2.4" stroke-linejoin="round"/>
+      <polyline points="103,165 117,173" fill="none" stroke="#d4d4d8" stroke-width="2.2" stroke-linecap="round"/>
+      <polyline points="277,165 263,173" fill="none" stroke="#d4d4d8" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="159" cy="190" r="4.2" fill="#07070c" stroke="#f4f4f6" stroke-width="2.2"/>
+      <circle cx="221" cy="190" r="4.2" fill="#07070c" stroke="#f4f4f6" stroke-width="2.2"/>
+    </g>
+  </g>
+
+  <!-- Center Crossbar Pill (ensures razor-sharp contrast on GitHub Dark & Light) -->
+  <rect x="18" y="114" width="344" height="52" rx="6" fill="#08080d"/>
+  <line x1="20" y1="114" x2="360" y2="114" stroke="#ef233c" stroke-width="1.6" stroke-opacity="0.85"/>
+  <line x1="20" y1="166" x2="360" y2="166" stroke="#ef233c" stroke-width="1.6" stroke-opacity="0.85"/>
+
+  <!-- Flanking brushed-titanium wing accents matching original horizontal crossbar notches -->
+  <polygon points="34,116 74,116 69,119 38,119" fill="#d4d4d8"/>
+  <polygon points="346,116 306,116 311,119 342,119" fill="#d4d4d8"/>
+  <polygon points="34,164 74,164 69,161 38,161" fill="#d4d4d8"/>
+  <polygon points="346,164 306,164 311,161 342,161" fill="#d4d4d8"/>
+
+  <!-- Wordmark -->
+  <text x="190" y="152" text-anchor="middle"
+        font-family="'Chakra Petch', 'Bahnschrift SemiBold', 'Bahnschrift', 'Segoe UI', system-ui, sans-serif"
+        font-size="36" font-weight="700" letter-spacing="4.5" fill="#f4f4f6">OSCILLINK</text>
+</svg>
