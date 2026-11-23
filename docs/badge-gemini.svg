@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Forged by Gemini 4 Neon">
+  <defs>
+    <linearGradient id="sealObsidian" x1="16" y1="12" x2="144" y2="148" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#171724"/>
+      <stop offset="52%" stop-color="#06060b"/>
+      <stop offset="100%" stop-color="#12091c"/>
+    </linearGradient>
+    <linearGradient id="sealNeonEdge" x1="12" y1="16" x2="148" y2="144" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="34%" stop-color="#9B72CB"/>
+      <stop offset="68%" stop-color="#D96570"/>
+      <stop offset="100%" stop-color="#00E5FF"/>
+    </linearGradient>
+    <linearGradient id="sealOrbit" x1="48" y1="68" x2="112" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#d4d4d8" stop-opacity="0.85"/>
+      <stop offset="50%" stop-color="#9B72CB" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="sealStar" x1="58" y1="58" x2="102" y2="102" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="36%" stop-color="#9B72CB"/>
+      <stop offset="70%" stop-color="#D96570"/>
+      <stop offset="100%" stop-color="#00E5FF"/>
+    </linearGradient>
+    <linearGradient id="sealIceText" x1="36" y1="120" x2="124" y2="136" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#dbeafe"/>
+      <stop offset="50%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#67e8f9"/>
+    </linearGradient>
+    <radialGradient id="sealCoreGlow" cx="80" cy="80" r="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4285F4" stop-opacity="0.28"/>
+      <stop offset="55%" stop-color="#9B72CB" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#06060b" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="sealInnerClip">
+      <circle cx="80" cy="80" r="71"/>
+    </clipPath>
+    <path id="topArcPath" d="M 26,80 A 54,54 0 1,1 134,80"/>
+    <path id="botArcPath" d="M 18,80 A 62,62 0 1,0 142,80"/>
+  </defs>
+
+  <!-- Outer soft Gemini neon halo edge -->
+  <circle cx="80" cy="80" r="73" fill="none" stroke="url(#sealNeonEdge)" stroke-width="5.5" stroke-opacity="0.26"/>
+
+  <!-- Volcanic Obsidian Medallion Body -->
+  <circle cx="80" cy="80" r="72" fill="url(#sealObsidian)"/>
+
+  <!-- Inner specular stone facet + rim bleed -->
+  <g clip-path="url(#sealInnerClip)">
+    <path d="M 8,80 A 72,72 0 0,1 114,16 L 56,88 L 8,88 Z" fill="#ffffff" fill-opacity="0.036"/>
+    <circle cx="80" cy="80" r="69.5" fill="none" stroke="url(#sealNeonEdge)" stroke-width="3.5" stroke-opacity="0.16"/>
+  </g>
+
+  <!-- Razor-sharp Gemini Multi-Color Neon Perimeter Edge -->
+  <circle cx="80" cy="80" r="72" fill="none" stroke="url(#sealNeonEdge)" stroke-width="2.4"/>
+
+  <!-- Inner Dark Core Orb + Neon Ring -->
+  <circle cx="80" cy="80" r="42" fill="#050509"/>
+  <circle cx="80" cy="80" r="40" fill="url(#sealCoreGlow)"/>
+  <circle cx="80" cy="80" r="42" fill="none" stroke="url(#sealNeonEdge)" stroke-width="1.35" stroke-opacity="0.72"/>
+
+  <!-- 9 o'clock & 3 o'clock obsidian diamond dividers -->
+  <polygon points="22.5,77.2 25.3,80 22.5,82.8 19.7,80" fill="url(#sealNeonEdge)"/>
+  <polygon points="137.5,77.2 140.3,80 137.5,82.8 134.7,80" fill="url(#sealNeonEdge)"/>
+
+  <!-- Antigravity Orbital Arc (back pass) -->
+  <ellipse cx="80" cy="80" rx="31" ry="10.5" transform="rotate(-26 80 80)" fill="none" stroke="url(#sealOrbit)" stroke-width="1.5" stroke-opacity="0.75"/>
+
+  <!-- Glowing 4-Point Gemini Sparkle Star Centerpiece -->
+  <path d="M 80,56 C 81.8,71 89,78.2 104,80 C 89,81.8 81.8,89 80,104 C 78.2,89 71,81.8 56,80 C 71,78.2 78.2,71 80,56 Z" fill="url(#sealStar)"/>
+  <path d="M 80,64 C 81.1,73.5 85.5,77.9 95,80 C 85.5,82.1 81.1,86.5 80,96 C 78.9,86.5 74.5,82.1 65,80 C 74.5,77.9 78.9,73.5 80,64 Z" fill="#ffffff" fill-opacity="0.28"/>
+
+  <!-- Small orbital accent sparkle -->
+  <path d="M 97,61 C 97.4,64.2 98.8,65.6 102,66 C 98.8,66.4 97.4,67.8 97,71 C 96.6,67.8 95.2,66.4 92,66 C 95.2,65.6 96.6,64.2 97,61 Z" fill="#00E5FF"/>
+  <circle cx="62" cy="95" r="1.8" fill="#d4d4d8"/>
+
+  <!-- Curved Google-Geometric Arc Typography -->
+  <text font-family="'Google Sans','Product Sans','Avenir Next','Century Gothic','Segoe UI',system-ui,sans-serif"
+        font-size="10.2" font-weight="600" letter-spacing="2.8" fill="#d4d4d8" text-rendering="geometricPrecision">
+    <textPath href="#topArcPath" startOffset="50%" text-anchor="middle">FORGED BY</textPath>
+  </text>
+
+  <text font-family="'Google Sans','Product Sans','Avenir Next','Century Gothic','Segoe UI',system-ui,sans-serif"
+        font-size="10.6" font-weight="700" letter-spacing="1.9" fill="url(#sealIceText)" text-rendering="geometricPrecision">
+    <textPath href="#botArcPath" startOffset="50%" text-anchor="middle">GEMINI 4 NEON</textPath>
+  </text>
+</svg>
