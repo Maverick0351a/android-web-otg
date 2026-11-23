@@ -1,0 +1,30 @@
+[package]
+name = "android-web-otg"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Headless Android AOAv2 USB OTG mouse, keyboard, phone specs, and live telemetry web bridge"
+license = "MIT"
+keywords = ["android", "aoa", "aoav2", "usb", "otg", "hid", "scrcpy", "adb"]
+categories = ["command-line-utilities", "hardware-support", "web-programming::http-server"]
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4.6", features = ["derive", "env"] }
+futures-util = "0.3"
+nusb = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+subtle = "2.6"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "process"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

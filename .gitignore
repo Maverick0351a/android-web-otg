@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+*.jsonl
+*.log
+.DS_Store
+.vscode/
+.idea/

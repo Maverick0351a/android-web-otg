@@ -1,0 +1,1142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>android-web-otg — Headless Android USB OTG Bridge</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f14;
+    --panel: #131a23;
+    --panel-2: #0f151d;
+    --border: #243040;
+    --accent: #38bdf8;
+    --accent-2: #0284c7;
+    --ok: #22c55e;
+    --warn: #f59e0b;
+    --err: #ef4444;
+    --text: #e6edf3;
+    --muted: #8b98a8;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(circle at 20% 0%, #142030 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  .app { max-width: 1240px; margin: 0 auto; display: grid; gap: 14px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  }
+  .topbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .brand h1 { margin: 0; font-size: 1.15rem; letter-spacing: 0.2px; display: flex; align-items: center; gap: 8px; }
+  .brand .sub { color: var(--muted); font-size: 0.84rem; margin-top: 3px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+    background: #1d2633; border: 1px solid var(--border); color: var(--muted);
+  }
+  .pill.ok { background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.35); color: #4ade80; }
+  .pill.warn { background: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.35); color: #fbbf24; }
+  .pill.err { background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.35); color: #f87171; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+  button {
+    background: #1d2633; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 0.84rem; font-weight: 500;
+    transition: border-color 0.12s, background 0.12s, transform 0.05s;
+  }
+  button:hover { border-color: var(--accent); background: #232f40; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent-2); border-color: var(--accent-2); color: #fff; font-weight: 600; }
+  button.primary:hover { background: #0369a1; border-color: var(--accent); }
+  button.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25); }
+  button.danger { border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; }
+  button.sm { padding: 5px 9px; font-size: 0.78rem; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .workspace {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  @media (max-width: 920px) { .workspace { grid-template-columns: 1fr; } }
+
+  /* Realistic Phone Frame */
+  .phone-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .phone-tabs { display: flex; width: 100%; background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 4px; }
+  .phone-tabs button { flex: 1; border: none; background: transparent; padding: 6px 8px; font-size: 0.8rem; }
+  .phone-tabs button.active { background: #1e293b; color: var(--accent); box-shadow: none; }
+
+  .phone-chassis {
+    position: relative;
+    width: 320px;
+    background: linear-gradient(160deg, #273140 0%, #11161d 55%, #1d2530 100%);
+    border-radius: 38px;
+    padding: 12px;
+    border: 2px solid #334155;
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+  .phone-chassis::before {
+    content: ""; position: absolute; right: -5px; top: 130px; width: 4px; height: 48px;
+    background: #334155; border-radius: 0 3px 3px 0;
+  }
+  .phone-chassis::after {
+    content: ""; position: absolute; left: -5px; top: 105px; width: 4px; height: 74px;
+    background: #334155; border-radius: 3px 0 0 3px;
+  }
+  .phone-bezel {
+    background: #070a0f;
+    border-radius: 28px;
+    padding: 10px 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid #1e293b;
+  }
+  .phone-notch-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 10px; font-size: 0.72rem; color: var(--muted);
+  }
+  .speaker-pill {
+    width: 64px; height: 8px; border-radius: 999px; background: #171e29;
+    border: 1px solid #263142; position: relative;
+  }
+  .speaker-pill::after {
+    content: ""; position: absolute; right: 6px; top: 2px; width: 4px; height: 4px;
+    border-radius: 50%; background: #1d4ed8;
+  }
+  .phone-screen {
+    position: relative;
+    height: 440px;
+    border-radius: 18px;
+    overflow: hidden;
+    background-color: #0b1118;
+    background-image: radial-gradient(rgba(148, 163, 184, 0.16) 1px, transparent 1px);
+    background-size: 16px 16px;
+    border: 1px solid #1f2a38;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+  .phone-screen.otg-mode { cursor: crosshair; }
+  .phone-screen.locked { border-color: var(--ok); box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.45); background-color: #091510; }
+  .otg-badge {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    white-space: nowrap; font-size: 0.72rem; font-weight: 600; padding: 3px 9px;
+    border-radius: 999px; background: rgba(15, 23, 42, 0.88); border: 1px solid var(--border); color: var(--accent);
+    pointer-events: none; z-index: 3;
+  }
+  .otg-hint { text-align: center; padding: 18px; pointer-events: none; z-index: 2; }
+  .otg-hint strong { display: block; font-size: 0.92rem; margin-bottom: 6px; }
+  .otg-hint span { color: var(--muted); font-size: 0.79rem; line-height: 1.4; display: block; }
+  .vcursor {
+    position: absolute; width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(56, 189, 248, 0.9); border: 2px solid #fff;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.8);
+    transform: translate(-50%, -50%); pointer-events: none; z-index: 4;
+    left: 50%; top: 55%; transition: background 0.1s;
+  }
+  .vcursor.down { background: #4ade80; transform: translate(-50%, -50%) scale(0.85); }
+  .ripple {
+    position: absolute; width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid var(--accent); transform: translate(-50%, -50%) scale(0.4);
+    opacity: 0.9; pointer-events: none; z-index: 3;
+    animation: rippleAnim 0.4s ease-out forwards;
+  }
+  @keyframes rippleAnim {
+    to { transform: translate(-50%, -50%) scale(2.1); opacity: 0; }
+  }
+
+  .mirror-wrap { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #05080c; }
+  #screenImg { width: 100%; height: 100%; object-fit: contain; cursor: pointer; display: none; }
+  .mirror-empty { text-align: center; padding: 18px; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
+  .phone-home-bar { width: 92px; height: 4px; border-radius: 999px; background: #334155; margin: 2px auto 0; }
+
+  .sidebar { display: grid; gap: 12px; }
+  .section-title { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 10px; display: flex; justify-content: space-between; align-items: center; }
+
+  input[type=text], input[type=password], select {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 7px 10px; font-size: 0.85rem; outline: none;
+  }
+  input[type=text]:focus, input[type=password]:focus, select:focus { border-color: var(--accent); }
+  .grow { flex: 1; min-width: 140px; }
+  .muted { color: var(--muted); font-size: 0.8rem; }
+
+  .unlock-box {
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    background: linear-gradient(180deg, rgba(14, 116, 144, 0.12) 0%, rgba(15, 21, 29, 0.6) 100%);
+  }
+  .kbd-grid { display: grid; grid-template-columns: repeat(3, 52px); gap: 5px; justify-content: start; }
+  .kbd-grid .spacer { visibility: hidden; }
+
+  /* Telemetry Panel */
+  .metrics-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 8px; margin-bottom: 10px;
+  }
+  .metric-tile {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  }
+  .metric-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .metric-val { font-family: var(--mono); font-size: 1rem; font-weight: 700; margin-top: 2px; color: var(--text); }
+  .log-box {
+    background: #080c11; border: 1px solid var(--border); border-radius: 8px;
+    height: 190px; overflow-y: auto; padding: 8px 10px; font-family: var(--mono); font-size: 0.77rem; line-height: 1.45;
+  }
+  .log-line { display: flex; gap: 8px; border-bottom: 1px solid rgba(36, 48, 64, 0.35); padding: 2px 0; }
+  .log-ts { color: #64748b; flex-shrink: 0; }
+  .log-cat { color: var(--accent); width: 44px; flex-shrink: 0; text-transform: uppercase; font-weight: 600; }
+  .log-lvl-ok { color: #4ade80; }
+  .log-lvl-warn { color: #fbbf24; }
+  .log-lvl-error { color: #f87171; }
+  .log-lvl-info { color: #cbd5e1; }
+
+  /* Modal */
+  .backdrop {
+    position: fixed; inset: 0; background: rgba(5, 8, 13, 0.75); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50;
+  }
+  .backdrop.open { display: flex; }
+  .modal {
+    width: 100%; max-width: 720px; max-height: 88vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+  }
+  .spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(195px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .spec-item { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .spec-k { font-size: 0.71rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .spec-v { font-size: 0.87rem; font-weight: 600; margin-top: 2px; word-break: break-word; font-family: var(--mono); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 6px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  code { font-family: var(--mono); font-size: 0.82rem; background: var(--panel-2); padding: 2px 6px; border-radius: 5px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Top Header -->
+  <div class="card topbar">
+    <div class="brand">
+      <h1>android-web-otg <span class="pill" id="verPill">AOAv2 HID + ADB</span></h1>
+      <div class="sub" id="deviceSummary">Waiting for USB device probe...</div>
+    </div>
+    <div class="row">
+      <span id="usbPill" class="pill err"><span class="dot"></span>USB OTG: Checking</span>
+      <span id="adbPill" class="pill"><span class="dot"></span>ADB: Offline</span>
+      <span id="wsPill" class="pill"><span class="dot"></span>WS: Connecting</span>
+      <button id="btnSpecs">Phone Specs</button>
+      <button id="btnReconnect" class="primary">Reconnect USB</button>
+    </div>
+  </div>
+
+  <!-- Main Workspace -->
+  <div class="workspace">
+
+    <!-- Left: Realistic Phone Frame -->
+    <div class="card phone-wrap">
+      <div class="phone-tabs">
+        <button id="tabOtg" class="active">OTG Trackpad (Pre-ADB)</button>
+        <button id="tabMirror">ADB Screen Preview</button>
+      </div>
+
+      <div class="row" id="otgControls" style="width:100%; justify-content:space-between;">
+        <div class="row">
+          <button id="modeLock" class="sm active">Pointer Lock</button>
+          <button id="modeDrag" class="sm">Free Trackpad</button>
+          <button id="btnHoldLeft" class="sm">Hold Left</button>
+        </div>
+        <label class="muted">Sens <input id="sens" type="range" min="0.5" max="3.0" step="0.25" value="1.25" style="width:72px;vertical-align:middle;"></label>
+      </div>
+
+      <div class="row" id="mirrorControls" style="width:100%; justify-content:space-between; display:none;">
+        <div class="row">
+          <button id="btnMirrorToggle" class="sm primary">Pause</button>
+          <select id="mirrorRate" class="sm">
+            <option value="500">0.5s</option>
+            <option value="1000" selected>1.0s</option>
+            <option value="2000">2.0s</option>
+          </select>
+        </div>
+        <span class="muted" id="mirrorResLabel">Click = tap, Drag = swipe</span>
+      </div>
+
+      <div class="phone-chassis">
+        <div class="phone-bezel">
+          <div class="phone-notch-row">
+            <span id="clockText">USB HID</span>
+            <div class="speaker-pill"></div>
+            <span id="adbMiniState">NO ADB</span>
+          </div>
+
+          <!-- Trackpad Mode Surface -->
+          <div id="pad" class="phone-screen otg-mode" tabindex="0">
+            <div class="otg-badge" id="otgBadge">OTG HID Mode — Steering physical phone</div>
+            <div class="vcursor" id="vcursor"></div>
+            <div class="otg-hint">
+              <strong id="padTitle">Click bezel to capture mouse</strong>
+              <span id="padSub">Moves the cursor directly on the phone display. Left/right click &amp; scroll forwarded. Press <b>Esc</b> to release.</span>
+            </div>
+          </div>
+
+          <!-- ADB Screen Mirror Surface -->
+          <div id="mirrorBox" class="phone-screen" style="display:none;">
+            <div class="mirror-wrap">
+              <img id="screenImg" alt="Android Screen Preview" draggable="false">
+              <div id="mirrorEmpty" class="mirror-empty">
+                Enable <b>USB debugging</b> on the phone via the OTG Trackpad tab to unlock live screen preview, click-to-tap, and full hardware specs.
+              </div>
+            </div>
+          </div>
+
+          <div class="phone-home-bar"></div>
+        </div>
+      </div>
+
+      <div class="row" style="width:100%; justify-content:center;">
+        <button id="btnLeftClick" class="sm">Left Click</button>
+        <button id="btnRightClick" class="sm">Right Click (Back)</button>
+        <button id="btnMiddleClick" class="sm">Middle Click</button>
+      </div>
+
+      <div id="scrcpyBanner" class="muted" style="display:none; width:100%; text-align:center;">
+        Full FPS desktop mirror: <code id="scrcpyCmdText">scrcpy</code>
+        <button class="sm" id="btnCopyScrcpy">Copy</button>
+      </div>
+    </div>
+
+    <!-- Right: Sidebar Controls -->
+    <div class="sidebar">
+
+      <!-- Quick Unlock / Login Code -->
+      <div class="card unlock-box">
+        <div class="section-title">
+          <span>Quick Unlock / Login Code</span>
+          <span class="muted" style="text-transform:none;font-weight:400;">Typed over HID · never stored or logged</span>
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <input id="unlockSecret" class="grow" type="password" autocomplete="off" spellcheck="false" placeholder="PIN, passcode, or password...">
+          <button id="btnToggleSecret" class="sm" type="button">Show</button>
+          <button id="btnClearSecret" class="sm" type="button">Clear</button>
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <select id="unlockWake">
+            <option value="swipe">Wake + Swipe Up &rarr; Type</option>
+            <option value="space">Wake + Space &times;2 &rarr; Type</option>
+            <option value="none">Type Immediately</option>
+          </select>
+          <label class="muted"><input id="unlockEnter" type="checkbox" checked> + Enter</label>
+          <label class="muted" title="Triggers once per newly attached USB phone while this tab stays open">
+            <input id="unlockAuto" type="checkbox"> Auto-insert on USB connect
+          </label>
+        </div>
+        <div class="row">
+          <button id="btnSendUnlock" class="primary">Send Unlock Now</button>
+          <button id="btnSendPreset" style="display:none;">Unlock with Server Preset</button>
+          <span id="unlockFeedback" class="muted"></span>
+        </div>
+      </div>
+
+      <!-- Quick Android Actions -->
+      <div class="card">
+        <div class="section-title">
+          <span>Navigation &amp; Accessibility Shortcuts</span>
+          <label class="muted" style="text-transform:none;font-weight:400;">
+            <input id="liveKbd" type="checkbox"> Live Keyboard Capture
+          </label>
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <button class="primary" onclick="sendSwipeUp()">Swipe Up (Unlock)</button>
+          <button onclick="shortcut('home')">Home</button>
+          <button onclick="shortcut('back')">Back</button>
+          <button onclick="shortcut('settings')">Settings</button>
+          <button onclick="shortcut('notifications')">Notifications</button>
+          <button onclick="shortcut('assistant')">Assistant</button>
+          <button onclick="shortcut('wake')">Wake (Space)</button>
+        </div>
+        <div class="row" style="align-items:flex-start; justify-content:space-between; margin-bottom:10px;">
+          <div>
+            <div class="muted" style="margin-bottom:4px;">TalkBack Navigation</div>
+            <div class="row">
+              <button class="sm" onclick="shortcut('talkback_prev')">Prev (Alt+&larr;)</button>
+              <button class="sm" onclick="shortcut('talkback_next')">Next (Alt+&rarr;)</button>
+              <button class="sm" onclick="shortcut('talkback_activate')">Activate (Alt+Enter)</button>
+            </div>
+            <div class="row" style="margin-top:6px;">
+              <button class="sm" onclick="shortcut('tab')">Tab</button>
+              <button class="sm" onclick="shortcut('backspace')">Backspace</button>
+              <button class="sm" onclick="shortcut('enter')">Enter</button>
+            </div>
+          </div>
+          <div class="kbd-grid">
+            <span class="spacer"></span>
+            <button class="sm" onclick="shortcut('up')">&uarr;</button>
+            <span class="spacer"></span>
+            <button class="sm" onclick="shortcut('left')">&larr;</button>
+            <button class="sm" onclick="shortcut('enter')">OK</button>
+            <button class="sm" onclick="shortcut('right')">&rarr;</button>
+            <span class="spacer"></span>
+            <button class="sm" onclick="shortcut('down')">&darr;</button>
+            <span class="spacer"></span>
+          </div>
+        </div>
+        <div class="row">
+          <input id="txtInput" class="grow" type="text" placeholder="Type text to phone (Wi-Fi SSID, search, commands)...">
+          <label class="muted"><input id="txtEnter" type="checkbox" checked> + Enter</label>
+          <button id="btnSendText" class="primary">Send Text</button>
+        </div>
+        <div id="errBar" class="muted" style="margin-top:6px; color:#f87171;"></div>
+      </div>
+
+      <!-- Error / USB Troubleshooting Helper -->
+      <div class="card" id="usbNoteCard">
+        <div class="section-title"><span>Session Status</span></div>
+        <div id="usbMeta" class="muted">Checking USB bridge status...</div>
+        <pre id="adbListBox" style="margin:8px 0 0;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:0.78rem;overflow-x:auto;">adb devices: checking...</pre>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Bottom: Local Telemetry & Event Log -->
+  <div class="card">
+    <div class="topbar" style="margin-bottom:10px;">
+      <div class="section-title" style="margin:0;">Local Telemetry &amp; Event Log</div>
+      <div class="row">
+        <button class="sm active" data-filter="all">All</button>
+        <button class="sm" data-filter="usb">USB</button>
+        <button class="sm" data-filter="aoa">AOA</button>
+        <button class="sm" data-filter="hid">HID</button>
+        <button class="sm" data-filter="adb">ADB</button>
+        <button class="sm" data-filter="error">Errors</button>
+        <button class="sm" id="btnPauseLog">Pause</button>
+        <button class="sm" id="btnClearLog">Clear</button>
+        <button class="sm primary" id="btnExportLog">Export JSONL</button>
+      </div>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric-tile"><div class="metric-label">Mouse Pkts</div><div class="metric-val" id="mMouse">0</div></div>
+      <div class="metric-tile"><div class="metric-label">Key Pkts</div><div class="metric-val" id="mKeys">0</div></div>
+      <div class="metric-tile"><div class="metric-label">HID Latency</div><div class="metric-val" id="mLat">0.0 ms</div></div>
+      <div class="metric-tile"><div class="metric-label">Rate</div><div class="metric-val" id="mRate">0.0/s</div></div>
+      <div class="metric-tile"><div class="metric-label">Reconnects</div><div class="metric-val" id="mRec">0</div></div>
+      <div class="metric-tile"><div class="metric-label">Errors</div><div class="metric-val" id="mErr">0</div></div>
+      <div class="metric-tile"><div class="metric-label">Uptime</div><div class="metric-val" id="mUp">0s</div></div>
+    </div>
+
+    <div class="log-box" id="logBox"></div>
+  </div>
+</div>
+
+<!-- Phone Specs Popup Modal -->
+<div class="backdrop" id="specsModal">
+  <div class="modal">
+    <div class="topbar" style="margin-bottom:12px;">
+      <div>
+        <h2 style="margin:0;font-size:1.08rem;">Phone Hardware &amp; System Specs</h2>
+        <div class="muted">USB descriptors load pre-ADB; OS/RAM/storage/battery unlock with USB debugging.</div>
+      </div>
+      <div class="row">
+        <button class="sm" id="btnRefreshSpecs">Refresh</button>
+        <button class="sm danger" id="btnCloseSpecs">Close</button>
+      </div>
+    </div>
+    <div id="specsBody" class="muted">Loading specs...</div>
+  </div>
+</div>
+
+<!-- Optional Auth Token Modal -->
+<div class="backdrop" id="authModal">
+  <div class="modal" style="max-width:420px;">
+    <h2 style="margin:0 0 6px;font-size:1.05rem;">Authentication Required</h2>
+    <p class="muted" style="margin:0 0 12px;">This server requires a bearer/API token (`--token`). Enter it below (kept in page memory only).</p>
+    <div class="row">
+      <input id="authInput" class="grow" type="password" autocomplete="off" placeholder="API token...">
+      <button id="btnAuthSubmit" class="primary">Unlock UI</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const state = {
+  token: "",
+  dragMode: false,
+  holdLeft: false,
+  dragging: false,
+  dragMoved: false,
+  curButtons: 0,
+  pendingDx: 0,
+  pendingDy: 0,
+  pendingVScroll: 0,
+  pendingHScroll: 0,
+  flushTimer: null,
+  vcX: 160,
+  vcY: 235,
+  adbAuthorized: false,
+  adbSerial: null,
+  activeTab: "otg",
+  mirrorRunning: true,
+  mirrorTimer: null,
+  mirrorDown: null,
+  autoUnlockedKey: null,
+  lastTelId: 0,
+  logPaused: false,
+  logFilter: "all",
+  events: [],
+  ws: null,
+  wsBackoffMs: 1000,
+  sse: null,
+  sseLive: false
+};
+
+function apiHeaders(extra = {}) {
+  const h = {...extra};
+  if (state.token) h["X-Auth-Token"] = state.token;
+  return h;
+}
+
+async function apiFetch(url, opts = {}) {
+  const res = await fetch(url, {...opts, headers: apiHeaders(opts.headers || {})});
+  if (res.status === 401) {
+    document.getElementById("authModal").classList.add("open");
+    throw new Error("Authentication required");
+  }
+  return res;
+}
+
+async function post(url, body = {}) {
+  try {
+    const res = await apiFetch(url, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    });
+    const j = await res.json();
+    document.getElementById("errBar").textContent = j.ok ? "" : (j.error || "Request failed");
+    return j;
+  } catch (e) {
+    document.getElementById("errBar").textContent = String(e.message || e);
+    return {ok: false, error: String(e)};
+  }
+}
+
+function connectWs() {
+  if (state.ws && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) return;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const tok = state.token ? "?token=" + encodeURIComponent(state.token) : "";
+  const wsPill = document.getElementById("wsPill");
+  try {
+    const ws = new WebSocket(`${proto}//${location.host}/ws/hid${tok}`);
+    state.ws = ws;
+    ws.onopen = () => {
+      state.wsBackoffMs = 1000;
+      wsPill.className = "pill ok";
+      wsPill.innerHTML = '<span class="dot"></span>WS: Live';
+    };
+    ws.onmessage = ev => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg && msg.ok === false && msg.error) {
+          document.getElementById("errBar").textContent = msg.error;
+        }
+      } catch (_) {}
+    };
+    ws.onclose = () => {
+      state.ws = null;
+      wsPill.className = "pill warn";
+      wsPill.innerHTML = '<span class="dot"></span>HTTP Fallback';
+      setTimeout(connectWs, state.wsBackoffMs);
+      state.wsBackoffMs = Math.min(8000, state.wsBackoffMs * 2);
+    };
+    ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  } catch (_) {
+    wsPill.className = "pill warn";
+    wsPill.innerHTML = '<span class="dot"></span>HTTP Fallback';
+  }
+}
+
+function sendHid(type, payload = {}, fallbackUrl = null) {
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({type, ...payload}));
+    return Promise.resolve({ok: true, via: "ws"});
+  }
+  return post(fallbackUrl || ("/api/" + type), payload);
+}
+
+function sendSwipeUp() { return sendHid("swipe_up", {}, "/api/swipe_up"); }
+function shortcut(name) { return sendHid("key", {shortcut: name}, "/api/key"); }
+function sens() { return parseFloat(document.getElementById("sens").value || "1.25"); }
+
+// Virtual cursor visual feedback inside the phone frame
+const pad = document.getElementById("pad");
+const vcursor = document.getElementById("vcursor");
+
+function moveVirtualCursor(dx, dy) {
+  const w = pad.clientWidth || 300;
+  const h = pad.clientHeight || 440;
+  state.vcX = Math.max(12, Math.min(w - 12, state.vcX + dx * 0.7));
+  state.vcY = Math.max(36, Math.min(h - 12, state.vcY + dy * 0.7));
+  vcursor.style.left = state.vcX + "px";
+  vcursor.style.top = state.vcY + "px";
+}
+
+function showRipple() {
+  const el = document.createElement("div");
+  el.className = "ripple";
+  el.style.left = state.vcX + "px";
+  el.style.top = state.vcY + "px";
+  pad.appendChild(el);
+  setTimeout(() => el.remove(), 420);
+}
+
+function flushMouse() {
+  state.flushTimer = null;
+  const dx = Math.max(-127, Math.min(127, Math.round(state.pendingDx)));
+  const dy = Math.max(-127, Math.min(127, Math.round(state.pendingDy)));
+  const vscroll = Math.max(-127, Math.min(127, Math.round(state.pendingVScroll)));
+  const hscroll = Math.max(-127, Math.min(127, Math.round(state.pendingHScroll)));
+  state.pendingDx -= dx;
+  state.pendingDy -= dy;
+  state.pendingVScroll = 0;
+  state.pendingHScroll = 0;
+  if (dx !== 0 || dy !== 0 || vscroll !== 0 || hscroll !== 0) {
+    sendHid("mouse", {dx, dy, buttons: state.curButtons, vscroll, hscroll}, "/api/mouse");
+  }
+  if (Math.abs(state.pendingDx) >= 1 || Math.abs(state.pendingDy) >= 1) {
+    state.flushTimer = setTimeout(flushMouse, 12);
+  }
+}
+
+function queueDelta(dx, dy, vscroll = 0, hscroll = 0) {
+  const sx = dx * sens();
+  const sy = dy * sens();
+  moveVirtualCursor(sx, sy);
+  state.pendingDx += sx;
+  state.pendingDy += sy;
+  state.pendingVScroll += vscroll;
+  state.pendingHScroll += hscroll;
+  if (!state.flushTimer) state.flushTimer = setTimeout(flushMouse, 12);
+}
+
+function setOtgMode(drag) {
+  state.dragMode = drag;
+  state.dragging = false;
+  if (document.pointerLockElement === pad) document.exitPointerLock();
+  document.getElementById("modeLock").classList.toggle("active", !drag);
+  document.getElementById("modeDrag").classList.toggle("active", drag);
+  document.getElementById("padTitle").textContent = drag ? "Free Trackpad Mode (drag to move, tap to click)" : "Click bezel to capture mouse";
+  document.getElementById("padSub").innerHTML = drag
+    ? "Dragging moves the phone cursor freely without holding clicks; short tap clicks; toggle <b>Hold Left</b> to drag-scroll."
+    : "Moves the cursor directly on the phone display. Left/right click &amp; scroll forwarded. Press <b>Esc</b> to release.";
+}
+
+document.getElementById("modeLock").onclick = () => setOtgMode(false);
+document.getElementById("modeDrag").onclick = () => setOtgMode(true);
+document.getElementById("btnHoldLeft").onclick = () => {
+  state.holdLeft = !state.holdLeft;
+  state.curButtons = state.holdLeft ? (state.curButtons | 1) : (state.curButtons & ~1);
+  document.getElementById("btnHoldLeft").classList.toggle("active", state.holdLeft);
+  vcursor.classList.toggle("down", state.curButtons > 0);
+  sendHid("mouse", {dx: 0, dy: 0, buttons: state.curButtons}, "/api/mouse");
+};
+document.getElementById("btnLeftClick").onclick = () => { showRipple(); sendHid("mouse", {click: "left"}, "/api/mouse"); };
+document.getElementById("btnRightClick").onclick = () => { showRipple(); sendHid("mouse", {click: "right"}, "/api/mouse"); };
+document.getElementById("btnMiddleClick").onclick = () => { showRipple(); sendHid("mouse", {click: "middle"}, "/api/mouse"); };
+
+document.addEventListener("pointerlockchange", () => {
+  const locked = document.pointerLockElement === pad;
+  pad.classList.toggle("locked", locked);
+  document.getElementById("padTitle").textContent = locked
+    ? "Mouse Captured — Moving Phone Live (Esc to release)"
+    : (state.dragMode ? "Free Trackpad Mode" : "Click bezel to capture mouse");
+  if (!locked && !state.holdLeft) {
+    state.curButtons = 0;
+    vcursor.classList.remove("down");
+    sendHid("mouse", {dx: 0, dy: 0, buttons: 0}, "/api/mouse");
+  }
+});
+
+pad.addEventListener("contextmenu", e => e.preventDefault());
+pad.addEventListener("mousedown", e => {
+  if (!state.dragMode) {
+    if (document.pointerLockElement !== pad) {
+      pad.requestPointerLock();
+      return;
+    }
+    const bit = e.button === 0 ? 1 : (e.button === 2 ? 2 : (e.button === 1 ? 4 : 0));
+    if (bit) {
+      state.curButtons |= bit;
+      vcursor.classList.add("down");
+      showRipple();
+      sendHid("mouse", {dx: 0, dy: 0, buttons: state.curButtons}, "/api/mouse");
+    }
+  } else {
+    state.dragging = true;
+    state.dragMoved = false;
+  }
+});
+
+window.addEventListener("mouseup", e => {
+  if (state.dragMode && state.dragging) {
+    const wasTap = !state.dragMoved && e.button === 0;
+    state.dragging = false;
+    if (wasTap && !state.holdLeft) {
+      showRipple();
+      sendHid("mouse", {click: "left"}, "/api/mouse");
+    }
+    return;
+  }
+  if (document.pointerLockElement === pad) {
+    const bit = e.button === 0 ? 1 : (e.button === 2 ? 2 : (e.button === 1 ? 4 : 0));
+    if (bit && !(bit === 1 && state.holdLeft)) {
+      state.curButtons &= ~bit;
+      vcursor.classList.toggle("down", state.curButtons > 0);
+      sendHid("mouse", {dx: 0, dy: 0, buttons: state.curButtons}, "/api/mouse");
+    }
+  }
+});
+
+pad.addEventListener("mousemove", e => {
+  if (document.pointerLockElement === pad) {
+    queueDelta(e.movementX, e.movementY, 0, 0);
+  } else if (state.dragMode && state.dragging) {
+    if (Math.abs(e.movementX) > 1 || Math.abs(e.movementY) > 1) state.dragMoved = true;
+    queueDelta(e.movementX, e.movementY, 0, 0);
+  }
+});
+
+pad.addEventListener("wheel", e => {
+  if (document.pointerLockElement === pad || state.dragMode) {
+    e.preventDefault();
+    const v = e.deltaY ? (e.deltaY < 0 ? 2 : -2) : 0;
+    const h = e.deltaX ? (e.deltaX > 0 ? 2 : -2) : 0;
+    queueDelta(0, 0, v, h);
+  }
+}, {passive: false});
+
+// Live keyboard forwarding
+const SPECIAL_HID = {
+  Enter: 0x28, Escape: 0x29, Backspace: 0x2A, Tab: 0x2B, " ": 0x2C,
+  ArrowRight: 0x4F, ArrowLeft: 0x50, ArrowDown: 0x51, ArrowUp: 0x52,
+  Delete: 0x4C, Home: 0x4A, End: 0x4D
+};
+
+window.addEventListener("keydown", e => {
+  const locked = document.pointerLockElement === pad;
+  if (!locked && !document.getElementById("liveKbd").checked) return;
+  const tag = (e.target && e.target.tagName || "").toUpperCase();
+  if (!locked && (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT")) return;
+  if (e.key === "Escape" && locked) return; // let browser release Pointer Lock
+  e.preventDefault();
+  if (e.key in SPECIAL_HID) {
+    const mod = (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+    sendHid("key", {mod, code: SPECIAL_HID[e.key]}, "/api/key");
+  } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    sendHid("text", {text: e.key, enter: false}, "/api/text");
+  }
+});
+
+// Phone Frame Tab Switching & ADB Screen Preview
+const tabOtg = document.getElementById("tabOtg");
+const tabMirror = document.getElementById("tabMirror");
+const screenImg = document.getElementById("screenImg");
+const mirrorEmpty = document.getElementById("mirrorEmpty");
+
+function setTab(tab) {
+  state.activeTab = tab;
+  const isOtg = tab === "otg";
+  tabOtg.classList.toggle("active", isOtg);
+  tabMirror.classList.toggle("active", !isOtg);
+  document.getElementById("otgControls").style.display = isOtg ? "flex" : "none";
+  document.getElementById("mirrorControls").style.display = isOtg ? "none" : "flex";
+  pad.style.display = isOtg ? "flex" : "none";
+  document.getElementById("mirrorBox").style.display = isOtg ? "none" : "flex";
+  if (!isOtg && state.adbAuthorized && state.mirrorRunning) refreshMirror();
+}
+
+tabOtg.onclick = () => setTab("otg");
+tabMirror.onclick = () => setTab("mirror");
+
+function refreshMirror() {
+  if (state.activeTab !== "mirror" || !state.adbAuthorized || !state.mirrorRunning) return;
+  const tok = state.token ? "&token=" + encodeURIComponent(state.token) : "";
+  screenImg.src = "/api/screen.png?t=" + Date.now() + tok;
+}
+
+screenImg.onload = () => {
+  screenImg.style.display = "block";
+  mirrorEmpty.style.display = "none";
+  if (screenImg.naturalWidth) {
+    document.getElementById("mirrorResLabel").textContent = screenImg.naturalWidth + "x" + screenImg.naturalHeight + " (click=tap, drag=swipe)";
+  }
+};
+screenImg.onerror = () => {
+  screenImg.style.display = "none";
+  mirrorEmpty.style.display = "block";
+};
+
+function mapImgPoint(e) {
+  const r = screenImg.getBoundingClientRect();
+  const nx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  const ny = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+  return {
+    x: Math.round(nx * (screenImg.naturalWidth || 1080)),
+    y: Math.round(ny * (screenImg.naturalHeight || 1920))
+  };
+}
+
+screenImg.addEventListener("mousedown", e => {
+  if (!state.adbAuthorized || !screenImg.naturalWidth) return;
+  state.mirrorDown = mapImgPoint(e);
+});
+screenImg.addEventListener("mouseup", async e => {
+  if (!state.mirrorDown) return;
+  const start = state.mirrorDown;
+  const end = mapImgPoint(e);
+  state.mirrorDown = null;
+  const dist = Math.hypot(end.x - start.x, end.y - start.y);
+  if (dist < 18) {
+    await post("/api/adb/tap", end);
+  } else {
+    await post("/api/adb/swipe", {x1: start.x, y1: start.y, x2: end.x, y2: end.y, duration_ms: 280});
+  }
+  setTimeout(refreshMirror, 220);
+});
+
+document.getElementById("btnMirrorToggle").onclick = () => {
+  state.mirrorRunning = !state.mirrorRunning;
+  document.getElementById("btnMirrorToggle").textContent = state.mirrorRunning ? "Pause" : "Resume";
+  if (state.mirrorRunning) refreshMirror();
+};
+
+function resetMirrorTimer() {
+  if (state.mirrorTimer) clearInterval(state.mirrorTimer);
+  const ms = parseInt(document.getElementById("mirrorRate").value || "1000", 10);
+  state.mirrorTimer = setInterval(refreshMirror, ms);
+}
+document.getElementById("mirrorRate").onchange = resetMirrorTimer;
+resetMirrorTimer();
+
+// Quick Unlock / Login Code
+document.getElementById("btnToggleSecret").onclick = () => {
+  const el = document.getElementById("unlockSecret");
+  const show = el.type === "password";
+  el.type = show ? "text" : "password";
+  document.getElementById("btnToggleSecret").textContent = show ? "Hide" : "Show";
+};
+document.getElementById("btnClearSecret").onclick = () => {
+  document.getElementById("unlockSecret").value = "";
+  document.getElementById("unlockFeedback").textContent = "";
+};
+
+async function runUnlock(usePreset) {
+  const wake = document.getElementById("unlockWake").value;
+  const enter = document.getElementById("unlockEnter").checked;
+  const fb = document.getElementById("unlockFeedback");
+  const payload = {wake_method: wake, enter, use_preset: !!usePreset};
+  if (!usePreset) {
+    const sec = document.getElementById("unlockSecret").value;
+    if (!sec) {
+      fb.textContent = "Enter a PIN/password first.";
+      return;
+    }
+    payload.secret = sec;
+  }
+  fb.textContent = "Sending unlock sequence...";
+  const res = await post("/api/unlock", payload);
+  if (res.ok) {
+    fb.textContent = "Sent (" + res.sent + " chars).";
+  } else {
+    fb.textContent = res.error || "Unlock failed";
+  }
+}
+
+document.getElementById("btnSendUnlock").onclick = () => runUnlock(false);
+document.getElementById("btnSendPreset").onclick = () => runUnlock(true);
+
+document.getElementById("btnSendText").onclick = async () => {
+  const el = document.getElementById("txtInput");
+  if (!el.value) return;
+  const res = await post("/api/text", {text: el.value, enter: document.getElementById("txtEnter").checked});
+  if (res.ok) el.value = "";
+};
+document.getElementById("txtInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("btnSendText").click(); }
+});
+document.getElementById("btnReconnect").onclick = async () => {
+  await post("/api/reconnect", {});
+  pollStatus();
+  pollTelemetry();
+};
+document.getElementById("btnCopyScrcpy").onclick = () => {
+  navigator.clipboard?.writeText(document.getElementById("scrcpyCmdText").textContent);
+};
+
+// Specs Modal
+const specsModal = document.getElementById("specsModal");
+function esc(v) { return String(v ?? "—").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function tile(k, v) { return `<div class="spec-item"><div class="spec-k">${esc(k)}</div><div class="spec-v">${esc(v)}</div></div>`; }
+
+async function loadSpecs() {
+  const body = document.getElementById("specsBody");
+  body.innerHTML = "<div class='muted'>Inspecting USB &amp; ADB descriptors...</div>";
+  try {
+    const res = await apiFetch("/api/specs");
+    const data = await res.json();
+    let html = "<h3 style='margin:0 0 8px;font-size:0.92rem;'>USB &amp; AOAv2 Hardware (Pre-ADB)</h3>";
+    if (data.usb) {
+      const u = data.usb;
+      html += "<div class='spec-grid'>" +
+        tile("Product", u.product) +
+        tile("Manufacturer", u.manufacturer || "—") +
+        tile("Serial", u.serial || "—") +
+        tile("USB VID : PID", u.vid + " : " + u.pid) +
+        tile("AOA Protocol", "v" + u.aoa_version) +
+        tile("USB Speed", u.usb_speed) +
+        tile("Active Config", u.usb_config) +
+        tile("Max Power", u.max_power_ma != null ? u.max_power_ma + " mA" : "—") +
+        tile("Bus / Addr", u.bus + " / " + u.address) +
+      "</div>";
+      if (u.interfaces && u.interfaces.length) {
+        html += "<table><thead><tr><th>#</th><th>Class</th><th>Name</th></tr></thead><tbody>" +
+          u.interfaces.map(i => `<tr><td>${esc(i.number)}</td><td><code>${esc(i.class_hex)}</code> ${esc(i.class_name)}</td><td>${esc(i.name || "—")}</td></tr>`).join("") +
+          "</tbody></table>";
+      }
+    } else {
+      html += "<div class='muted' style='margin-bottom:12px;'>No AOAv2 USB device currently attached.</div>";
+    }
+
+    html += "<h3 style='margin:16px 0 8px;font-size:0.92rem;'>Android System Specs (ADB)</h3>";
+    if (data.adb_authorized && data.android) {
+      const a = data.android;
+      const disp = a.display && a.display.width ? `${a.display.width}x${a.display.height} @ ${a.display.density_dpi || "?"} dpi` : "—";
+      const ram = a.memory && a.memory.total_mb ? `${a.memory.available_mb ?? "?"} / ${a.memory.total_mb} MiB free` : "—";
+      const stor = a.storage_data && a.storage_data.total_gb ? `${a.storage_data.available_gb} / ${a.storage_data.total_gb} GiB free (${a.storage_data.use_pct})` : "—";
+      const bat = a.battery && a.battery.level != null ? `${a.battery.level}% (${a.battery.status || "?"}, ${a.battery.powered || "?"}, ${a.battery.temperature_c ?? "?"}°C)` : "—";
+      html += "<div class='spec-grid'>" +
+        tile("Model / Codename", `${a.manufacturer} ${a.model} (${a.device})`) +
+        tile("Android / SDK", `Android ${a.android_version} (API ${a.sdk})`) +
+        tile("Security Patch", a.security_patch || "—") +
+        tile("SoC / Platform / ABI", `${a.hardware || "?"} / ${a.platform || "?"} (${a.abi || "?"})`) +
+        tile("Display", disp) +
+        tile("Memory (RAM)", ram) +
+        tile("Data Storage", stor) +
+        tile("Battery", bat) +
+        tile("Kernel", a.kernel || "—") +
+      "</div>";
+      if (data.scrcpy_cmd) {
+        html += `<div class='muted'>Desktop mirroring command: <code>${esc(data.scrcpy_cmd)}</code></div>`;
+      }
+    } else {
+      html += "<div class='muted'>USB debugging is not authorized yet. Enable Developer options &rarr; USB debugging using the OTG Trackpad tab to unlock full OS, SoC, RAM, storage, battery specs, and live screen preview.</div>";
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div style='color:#f87171;'>Failed to load specs: ${esc(e.message || e)}</div>`;
+  }
+}
+
+document.getElementById("btnSpecs").onclick = () => { specsModal.classList.add("open"); loadSpecs(); };
+document.getElementById("btnRefreshSpecs").onclick = loadSpecs;
+document.getElementById("btnCloseSpecs").onclick = () => specsModal.classList.remove("open");
+specsModal.addEventListener("click", e => { if (e.target === specsModal) specsModal.classList.remove("open"); });
+
+// Auth Modal
+document.getElementById("btnAuthSubmit").onclick = () => {
+  state.token = document.getElementById("authInput").value.trim();
+  document.getElementById("authModal").classList.remove("open");
+  if (state.ws) { try { state.ws.close(); } catch (_) {} state.ws = null; }
+  if (state.sse) { try { state.sse.close(); } catch (_) {} state.sse = null; state.sseLive = false; }
+  connectWs();
+  connectTelemetrySse();
+  pollStatus();
+  pollTelemetry();
+};
+
+// Status & Telemetry Polling
+function fmtUptime(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}h ${m}m` : (m ? `${m}m ${r}s` : `${r}s`);
+}
+
+function renderLogs() {
+  const box = document.getElementById("logBox");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 28;
+  const filtered = state.events.filter(ev => {
+    if (state.logFilter === "all") return true;
+    if (state.logFilter === "error") return ev.level === "error" || ev.level === "warn";
+    return ev.category === state.logFilter;
+  });
+  box.innerHTML = filtered.slice(-180).map(ev => {
+    const det = ev.detail ? " " + esc(JSON.stringify(ev.detail)) : "";
+    return `<div class="log-line"><span class="log-ts">${esc(ev.iso)}</span><span class="log-cat">${esc(ev.category)}</span><span class="log-lvl-${esc(ev.level)}">${esc(ev.message)}${det}</span></div>`;
+  }).join("");
+  if (!state.logPaused && atBottom) box.scrollTop = box.scrollHeight;
+}
+
+document.querySelectorAll("[data-filter]").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll("[data-filter]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.logFilter = btn.dataset.filter;
+    renderLogs();
+  };
+});
+document.getElementById("btnPauseLog").onclick = () => {
+  state.logPaused = !state.logPaused;
+  document.getElementById("btnPauseLog").textContent = state.logPaused ? "Resume" : "Pause";
+};
+document.getElementById("btnClearLog").onclick = async () => {
+  await post("/api/telemetry/clear", {});
+  state.events = [];
+  state.lastTelId = 0;
+  pollTelemetry();
+};
+document.getElementById("btnExportLog").onclick = async () => {
+  const res = await apiFetch("/api/telemetry?download=1");
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "android-web-otg-telemetry.jsonl";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+function updateMetrics(m) {
+  if (!m) return;
+  document.getElementById("mMouse").textContent = m.mouse_packets ?? 0;
+  document.getElementById("mKeys").textContent = m.key_packets ?? 0;
+  document.getElementById("mLat").textContent = `${m.avg_hid_ms ?? 0} / ${m.last_hid_ms ?? 0} ms`;
+  document.getElementById("mRate").textContent = `${m.events_per_sec ?? 0}/s`;
+  document.getElementById("mRec").textContent = m.reconnects ?? 0;
+  document.getElementById("mErr").textContent = m.errors ?? 0;
+  document.getElementById("mUp").textContent = fmtUptime(m.uptime_sec ?? 0);
+}
+
+function appendEvent(ev) {
+  if (!ev || ev.id <= state.lastTelId) return;
+  state.events.push(ev);
+  state.lastTelId = ev.id;
+  if (state.events.length > 300) state.events = state.events.slice(-300);
+}
+
+async function pollStatus() {
+  try {
+    const res = await apiFetch("/api/status");
+    const s = await res.json();
+    if (s.telemetry) updateMetrics(s.telemetry);
+    const usbPill = document.getElementById("usbPill");
+    const adbPill = document.getElementById("adbPill");
+    const sum = document.getElementById("deviceSummary");
+    const meta = document.getElementById("usbMeta");
+
+    if (s.connected && s.device) {
+      usbPill.className = "pill ok";
+      usbPill.innerHTML = `<span class="dot"></span>USB OTG: Connected (AOA v${esc(s.device.aoa_version)})`;
+      sum.textContent = `${s.device.manufacturer ? s.device.manufacturer + " " : ""}${s.device.product} [${s.device.vid}:${s.device.pid}] · Config: ${s.device.usb_config}`;
+      meta.textContent = `Serial: ${s.device.serial || "unknown"} · ${s.device.usb_speed} · MaxPower: ${s.device.max_power_ma ?? "?"} mA`;
+
+      const devKey = `${s.device.vid}:${s.device.pid}:${s.device.serial || s.device.bus}`;
+      if (document.getElementById("unlockAuto").checked && state.autoUnlockedKey !== devKey) {
+        const sec = document.getElementById("unlockSecret").value;
+        if (sec) {
+          state.autoUnlockedKey = devKey;
+          runUnlock(false);
+        }
+      }
+    } else {
+      state.autoUnlockedKey = null;
+      usbPill.className = "pill err";
+      usbPill.innerHTML = '<span class="dot"></span>USB OTG: Disconnected';
+      sum.textContent = s.error || "Plug an Android device in over USB data cable.";
+      meta.textContent = s.error || "Waiting for USB OTG / AOAv2-capable device.";
+    }
+
+    document.getElementById("btnSendPreset").style.display = s.unlock_preset_configured ? "inline-block" : "none";
+
+    state.adbAuthorized = !!s.adb_authorized;
+    state.adbSerial = s.adb_serial || null;
+    if (s.adb_authorized) {
+      adbPill.className = "pill ok";
+      adbPill.innerHTML = `<span class="dot"></span>ADB: ${esc(s.adb_serial)}`;
+      document.getElementById("adbMiniState").textContent = "ADB OK";
+      document.getElementById("scrcpyBanner").style.display = "block";
+      document.getElementById("scrcpyCmdText").textContent = "scrcpy -s " + s.adb_serial;
+    } else if (s.adb_devices && s.adb_devices.length) {
+      adbPill.className = "pill warn";
+      adbPill.innerHTML = '<span class="dot"></span>ADB: Unauthorized';
+      document.getElementById("adbMiniState").textContent = "AUTH?";
+      document.getElementById("scrcpyBanner").style.display = "none";
+    } else {
+      adbPill.className = "pill";
+      adbPill.innerHTML = '<span class="dot"></span>ADB: Off';
+      document.getElementById("adbMiniState").textContent = "NO ADB";
+      document.getElementById("scrcpyBanner").style.display = "none";
+    }
+
+    const adbText = (s.adb_devices && s.adb_devices.length) ? s.adb_devices.join("\n") : "(no adb devices yet)";
+    document.getElementById("adbListBox").textContent = "adb devices -l:\n" + adbText;
+  } catch (_) {}
+}
+
+async function pollTelemetry() {
+  try {
+    const res = await apiFetch("/api/telemetry?since_id=" + state.lastTelId);
+    const t = await res.json();
+    updateMetrics(t.metrics);
+    if (Array.isArray(t.events) && t.events.length) {
+      for (const ev of t.events) appendEvent(ev);
+      renderLogs();
+    }
+  } catch (_) {}
+}
+
+function connectTelemetrySse() {
+  if (typeof EventSource === "undefined") return;
+  if (state.sse) { try { state.sse.close(); } catch (_) {} }
+  const tok = state.token ? "?token=" + encodeURIComponent(state.token) : "";
+  try {
+    const es = new EventSource(`/api/telemetry/stream${tok}`);
+    state.sse = es;
+    es.onopen = () => { state.sseLive = true; };
+    es.addEventListener("telemetry", e => {
+      try {
+        appendEvent(JSON.parse(e.data));
+        renderLogs();
+      } catch (_) {}
+    });
+    es.onerror = () => { state.sseLive = false; };
+  } catch (_) {
+    state.sseLive = false;
+  }
+}
+
+connectWs();
+pollStatus();
+pollTelemetry().then(connectTelemetrySse);
+setInterval(pollStatus, 2000);
+setInterval(() => { if (!state.sseLive) pollTelemetry(); }, 2000);
+</script>
+</body>
+</html>

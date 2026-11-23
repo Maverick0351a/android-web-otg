@@ -1,0 +1,19 @@
+[Unit]
+Description=android-web-otg USB OTG Mouse/Keyboard Web Bridge
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=otg
+Group=plugdev
+# Bind to 127.0.0.1 or a private VPN/Tailscale interface.
+# For non-loopback binds, uncomment and set a strong API token:
+# Environment="ANDROID_WEB_OTG_TOKEN=replace-with-random-token"
+ExecStart=/usr/local/bin/android-web-otg --host 127.0.0.1 --port 8095
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
