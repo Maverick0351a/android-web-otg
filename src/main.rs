@@ -1,52 +1,69 @@
 //! Binary entrypoint for `android-web-otg`.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clap::Parser;
 use tokio::net::TcpListener;
+use tokio::sync::watch;
+use zeroize::Zeroizing;
 
-use android_web_otg::adb::AdbInspector;
-use android_web_otg::aoa::{spawn_hotplug_watcher, DeviceFilter, HidBackend, NusbAoaBridge};
-use android_web_otg::cli::{parse_hex_id, Cli};
-use android_web_otg::server::{build_router, AppState};
+use android_web_otg::aoa::{DeviceFilter, HidBackend, NusbAoaBridge};
+use android_web_otg::cli::Cli;
+use android_web_otg::server::{allowed_hosts_for_bind, build_router, AppState};
 use android_web_otg::telemetry::TelemetryStore;
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut sig) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            sig.recv().await;
+        } else {
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
+}
 
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = Cli::parse();
 
-    let mut ignore_vids = HashSet::new();
-    for raw in &args.ignore_vid {
-        match parse_hex_id(raw) {
-            Ok(id) => {
-                ignore_vids.insert(id);
-            }
-            Err(err) => {
-                eprintln!("Error: {err}");
+    let token = match args.token {
+        Some(raw) => {
+            if raw.trim().is_empty() {
+                eprintln!(
+                    "Error: --token / ANDROID_WEB_OTG_TOKEN must not be empty or whitespace."
+                );
                 return ExitCode::from(2);
             }
+            Some(Zeroizing::new(raw))
         }
-    }
-
-    let vid = match args.vid.as_deref().map(parse_hex_id).transpose() {
-        Ok(v) => v,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return ExitCode::from(2);
-        }
+        None => None,
     };
-    let pid = match args.pid.as_deref().map(parse_hex_id).transpose() {
-        Ok(p) => p,
+
+    let telemetry = match TelemetryStore::new(300, args.log_file) {
+        Ok(store) => Arc::new(store),
         Err(err) => {
-            eprintln!("Error: {err}");
+            eprintln!("Error opening telemetry --log-file: {err}");
             return ExitCode::from(2);
         }
     };
 
-    let telemetry = Arc::new(TelemetryStore::new(300, args.log_file));
     telemetry.log(
         "info",
         "system",
@@ -59,7 +76,8 @@ async fn main() -> ExitCode {
         None,
     );
 
-    if !matches!(args.host.as_str(), "127.0.0.1" | "localhost" | "::1") && args.token.is_none() {
+    if !matches!(args.host.as_str(), "127.0.0.1" | "localhost" | "::1" | "[::1]") && token.is_none()
+    {
         eprintln!(
             "WARNING: Binding to non-loopback address {} without --token. \
              Only expose this over a trusted VPN/Tailscale interface or set --token.",
@@ -73,7 +91,10 @@ async fn main() -> ExitCode {
         );
     }
 
-    let unlock_preset = std::env::var("ANDROID_WEB_OTG_UNLOCK_CODE").ok().filter(|s| !s.is_empty());
+    let unlock_preset = std::env::var("ANDROID_WEB_OTG_UNLOCK_CODE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(Zeroizing::new);
     if args.auto_unlock && unlock_preset.is_none() {
         eprintln!(
             "WARNING: --auto-unlock set without ANDROID_WEB_OTG_UNLOCK_CODE environment variable."
@@ -86,17 +107,27 @@ async fn main() -> ExitCode {
         );
     }
 
-    let bridge: Arc<dyn HidBackend> = Arc::new(NusbAoaBridge::new(
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let ignore_vids: HashSet<u16> = args.ignore_vid.into_iter().collect();
+    let (bridge_impl, actor_handle) = NusbAoaBridge::spawn(
         telemetry.clone(),
-        DeviceFilter { serial: args.serial.clone(), vid, pid, ignore_vids },
+        DeviceFilter { serial: args.serial, vid: args.vid, pid: args.pid, ignore_vids },
         unlock_preset,
         args.auto_unlock,
         args.unlock_wake.as_str().to_string(),
-    ));
-    spawn_hotplug_watcher(bridge.clone(), telemetry.clone());
+        shutdown_rx.clone(),
+    );
+    let bridge: Arc<dyn HidBackend> = bridge_impl;
 
-    let adb = Arc::new(AdbInspector::new(telemetry.clone(), !args.no_adb, args.serial));
-    let state = Arc::new(AppState { bridge, adb, telemetry, token: args.token });
+    let allowed_hosts = allowed_hosts_for_bind(&args.host, args.port);
+    let state = Arc::new(AppState {
+        bridge,
+        telemetry,
+        token,
+        sessions: Mutex::new(VecDeque::new()),
+        allowed_hosts,
+        shutdown_rx,
+    });
     let app = build_router(state);
 
     let bind_target = format!("{}:{}", args.host, args.port);
@@ -104,6 +135,8 @@ async fn main() -> ExitCode {
         Ok(l) => l,
         Err(err) => {
             eprintln!("Failed to bind {bind_target}: {err}");
+            let _ = shutdown_tx.send(true);
+            let _ = tokio::time::timeout(Duration::from_secs(2), actor_handle).await;
             return ExitCode::from(1);
         }
     };
@@ -112,11 +145,14 @@ async fn main() -> ExitCode {
     println!("android-web-otg listening on http://{actual_addr}");
 
     let serve_res = axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
             println!("\nShutting down...");
+            let _ = shutdown_tx.send(true);
         })
         .await;
+
+    let _ = tokio::time::timeout(Duration::from_secs(2), actor_handle).await;
 
     if let Err(err) = serve_res {
         eprintln!("Server error: {err}");

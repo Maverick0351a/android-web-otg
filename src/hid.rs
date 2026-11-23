@@ -6,6 +6,9 @@ pub const MOD_SHIFT: u8 = 0x02;
 pub const MOD_ALT: u8 = 0x04;
 pub const MOD_META: u8 = 0x08;
 
+/// Maximum HID keycode defined by our 45-byte boot keyboard report descriptor.
+pub const MAX_BOOT_KEYCODE: u8 = 0x65;
+
 /// 67-byte scrcpy-compatible 5-button relative mouse + vertical/horizontal wheel descriptor.
 pub const MOUSE_REPORT_DESC: [u8; 67] = [
     0x05, 0x01, // Usage Page (Generic Desktop)
@@ -89,10 +92,27 @@ pub fn pack_mouse_report(buttons: u8, dx: i32, dy: i32, vscroll: i32, hscroll: i
     ]
 }
 
-/// Pack an 8-byte boot keyboard HID input report.
+/// Pack an 8-byte boot keyboard HID input report, zeroing out-of-range keycodes safely.
 #[must_use]
 pub fn pack_keyboard_report(mod_mask: u8, keycode: u8) -> [u8; 8] {
-    [mod_mask, 0, keycode.min(0x65), 0, 0, 0, 0, 0]
+    let safe_code = if keycode <= MAX_BOOT_KEYCODE { keycode } else { 0 };
+    [mod_mask, 0, safe_code, 0, 0, 0, 0, 0]
+}
+
+/// Normalize CRLF sequences into LF so `\r\n` never presses Enter twice.
+#[must_use]
+pub fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+/// Verify that every character in `secret` can be typed via the US-ASCII HID map.
+pub fn validate_ascii_secret(secret: &str) -> Result<(), char> {
+    for ch in secret.chars() {
+        if ascii_to_hid(ch).is_none() {
+            return Err(ch);
+        }
+    }
+    Ok(())
 }
 
 /// Map named Android and TalkBack accessibility shortcuts into `(modifier, hid_keycode)`.
@@ -192,17 +212,21 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_report_clamps_and_packs() {
+    fn keyboard_report_zeroes_invalid_keycode() {
         assert_eq!(pack_keyboard_report(MOD_ALT, 0x4F), [MOD_ALT, 0, 0x4F, 0, 0, 0, 0, 0]);
-        assert_eq!(pack_keyboard_report(0, 0xFF), [0, 0, 0x65, 0, 0, 0, 0, 0]);
+        assert_eq!(pack_keyboard_report(0, 0x65), [0, 0, 0x65, 0, 0, 0, 0, 0]);
+        assert_eq!(pack_keyboard_report(0, 0xFF), [0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]
-    fn ascii_and_shortcuts_map_cleanly() {
+    fn ascii_validation_and_normalization_work() {
         assert_eq!(ascii_to_hid('a'), Some((0, 0x04)));
         assert_eq!(ascii_to_hid('Z'), Some((MOD_SHIFT, 0x1D)));
         assert_eq!(ascii_to_hid('!'), Some((MOD_SHIFT, 0x1E)));
         assert_eq!(ascii_to_hid('é'), None);
+        assert_eq!(normalize_newlines("abc\r\ndef"), "abc\ndef");
+        assert!(validate_ascii_secret("Pin!234").is_ok());
+        assert_eq!(validate_ascii_secret("Pin€"), Err('€'));
         assert_eq!(shortcut_to_hid("talkback_next"), Some((MOD_ALT, 0x4F)));
         assert_eq!(shortcut_to_hid("unknown_action"), None);
     }

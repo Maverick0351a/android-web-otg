@@ -1,18 +1,18 @@
-FROM rust:1-slim AS builder
+FROM rust:1-bookworm AS builder
 
 WORKDIR /build
-COPY Cargo.toml Cargo.lock* ./
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY static ./static
-RUN cargo build --release
+RUN cargo build --release --locked
 
 FROM debian:bookworm-slim
 
-RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends adb ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN groupadd -f plugdev \
+    && useradd -r -g plugdev -s /sbin/nologin otg
 
 COPY --from=builder /build/target/release/android-web-otg /usr/local/bin/android-web-otg
 
+USER otg
 EXPOSE 8095
 ENTRYPOINT ["/usr/local/bin/android-web-otg", "--host", "0.0.0.0", "--port", "8095"]

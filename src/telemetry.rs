@@ -1,11 +1,13 @@
-//! 100% local in-memory, SSE broadcast, and optional JSONL telemetry store.
+//! 100% local in-memory, SSE broadcast, and non-blocking optional JSONL telemetry store.
 
 use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError, TrySendError};
 use std::sync::Mutex;
+use std::thread::JoinHandle;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -30,8 +32,6 @@ pub struct TelemetryMetrics {
     pub uptime_sec: u64,
     pub mouse_packets: u64,
     pub key_packets: u64,
-    pub adb_actions: u64,
-    pub screen_frames: u64,
     pub reconnects: u64,
     pub errors: u64,
     pub ws_clients: usize,
@@ -59,47 +59,91 @@ struct InnerState {
     hid_timestamps: VecDeque<Instant>,
     mouse_packets: u64,
     key_packets: u64,
-    adb_actions: u64,
-    screen_frames: u64,
     reconnects: u64,
     errors: u64,
     last_hid_ms: f64,
     last_error: Option<String>,
 }
 
-/// Thread-safe local telemetry store with ring buffer, broadcast channel, and optional JSONL sink.
+struct FileSinkHandle {
+    tx: SyncSender<String>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl Drop for FileSinkHandle {
+    fn drop(&mut self) {
+        // Worker drains once all SyncSender clones drop; join best-effort on shutdown.
+        let (dummy_tx, _) = sync_channel(1);
+        let dropped_tx = std::mem::replace(&mut self.tx, dummy_tx);
+        drop(dropped_tx);
+        if let Some(handle) = self.worker.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Thread-safe local telemetry store with ring buffer, broadcast channel, and non-blocking JSONL sink.
 pub struct TelemetryStore {
     inner: Mutex<InnerState>,
     started: Instant,
     ws_clients: AtomicUsize,
     tx: broadcast::Sender<TelemetryEvent>,
-    log_path: Option<PathBuf>,
+    log_tx: Option<SyncSender<String>>,
+    _file_sink: Option<FileSinkHandle>,
 }
 
 impl TelemetryStore {
     /// Create a local telemetry store bounded to `max_events` (minimum 10).
-    #[must_use]
-    pub fn new(max_events: usize, log_file: Option<PathBuf>) -> Self {
-        let resolved_log = log_file.and_then(|path| {
+    /// Fails eagerly at startup if `log_file` cannot be created or opened for appending.
+    pub fn new(max_events: usize, log_file: Option<PathBuf>) -> std::io::Result<Self> {
+        let mut log_tx = None;
+        let mut file_sink = None;
+
+        if let Some(path) = log_file {
             if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() && fs::create_dir_all(parent).is_err() {
-                    return None;
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent)?;
                 }
             }
-            Some(path)
-        });
-        let (tx, _) = broadcast::channel(128);
-        Self {
+            let file = OpenOptions::new().create(true).append(true).open(&path)?;
+            let (sink_tx, sink_rx) = sync_channel::<String>(512);
+            let mut writer = BufWriter::new(file);
+            let worker =
+                std::thread::Builder::new().name("otg-tel-log".into()).spawn(move || {
+                    while let Ok(first) = sink_rx.recv() {
+                        let _ = writeln!(writer, "{first}");
+                        loop {
+                            match sink_rx.try_recv() {
+                                Ok(next) => {
+                                    let _ = writeln!(writer, "{next}");
+                                }
+                                Err(TryRecvError::Empty) => {
+                                    let _ = writer.flush();
+                                    break;
+                                }
+                                Err(TryRecvError::Disconnected) => {
+                                    let _ = writer.flush();
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    let _ = writer.flush();
+                })?;
+            log_tx = Some(sink_tx.clone());
+            file_sink = Some(FileSinkHandle { tx: sink_tx, worker: Some(worker) });
+        }
+
+        let (tx, _) = broadcast::channel(256);
+        Ok(Self {
             inner: Mutex::new(InnerState {
                 events: VecDeque::with_capacity(max_events.max(10)),
                 max_events: max_events.max(10),
                 next_id: 1,
                 hid_latencies: VecDeque::with_capacity(100),
-                hid_timestamps: VecDeque::with_capacity(256),
+                hid_timestamps: VecDeque::with_capacity(1024),
                 mouse_packets: 0,
                 key_packets: 0,
-                adb_actions: 0,
-                screen_frames: 0,
                 reconnects: 0,
                 errors: 0,
                 last_hid_ms: 0.0,
@@ -108,11 +152,12 @@ impl TelemetryStore {
             started: Instant::now(),
             ws_clients: AtomicUsize::new(0),
             tx,
-            log_path: resolved_log,
-        }
+            log_tx,
+            _file_sink: file_sink,
+        })
     }
 
-    /// Log a structured event into memory, broadcast listeners (SSE), and optional JSONL file.
+    /// Log a structured event into memory, broadcast listeners (SSE), and optional JSONL writer.
     pub fn log(
         &self,
         level: &str,
@@ -160,10 +205,10 @@ impl TelemetryStore {
 
         let _ = self.tx.send(event.clone());
 
-        if let Some(ref path) = self.log_path {
-            if let Ok(mut fh) = OpenOptions::new().create(true).append(true).open(path) {
-                if let Ok(line) = serde_json::to_string(&event) {
-                    let _ = writeln!(fh, "{line}");
+        if let Some(ref sink_tx) = self.log_tx {
+            if let Ok(line) = serde_json::to_string(&event) {
+                match sink_tx.try_send(line) {
+                    Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
                 }
             }
         }
@@ -186,20 +231,10 @@ impl TelemetryStore {
             st.hid_latencies.pop_front();
         }
         st.hid_latencies.push_back(clamped_ms);
-        if st.hid_timestamps.len() == 256 {
+        if st.hid_timestamps.len() == 1024 {
             st.hid_timestamps.pop_front();
         }
         st.hid_timestamps.push_back(now);
-    }
-
-    pub fn record_adb_action(&self) {
-        let mut st = self.inner.lock().expect("telemetry mutex poisoned");
-        st.adb_actions += 1;
-    }
-
-    pub fn record_screen_frame(&self) {
-        let mut st = self.inner.lock().expect("telemetry mutex poisoned");
-        st.screen_frames += 1;
     }
 
     pub fn record_reconnect(&self) {
@@ -219,6 +254,13 @@ impl TelemetryStore {
     #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<TelemetryEvent> {
         self.tx.subscribe()
+    }
+
+    /// Return buffered events with `id > since_id` (used for SSE `Last-Event-ID` catch-up).
+    #[must_use]
+    pub fn events_since(&self, since_id: u64) -> Vec<TelemetryEvent> {
+        let st = self.inner.lock().expect("telemetry mutex poisoned");
+        st.events.iter().filter(|ev| ev.id > since_id).cloned().collect()
     }
 
     fn compute_metrics(&self, st: &mut InnerState) -> TelemetryMetrics {
@@ -245,8 +287,6 @@ impl TelemetryStore {
             uptime_sec: self.started.elapsed().as_secs(),
             mouse_packets: st.mouse_packets,
             key_packets: st.key_packets,
-            adb_actions: st.adb_actions,
-            screen_frames: st.screen_frames,
             reconnects: st.reconnects,
             errors: st.errors,
             ws_clients: self.ws_clients.load(Ordering::Relaxed),
@@ -309,9 +349,11 @@ impl TelemetryStore {
         out
     }
 
-    pub fn clear(&self) {
+    /// Clear buffered events and return the next sequence ID so clients stay synced.
+    pub fn clear(&self) -> u64 {
         let mut st = self.inner.lock().expect("telemetry mutex poisoned");
         st.events.clear();
+        st.next_id
     }
 }
 
@@ -322,7 +364,7 @@ mod tests {
 
     #[test]
     fn ring_buffer_and_filters_behave_cleanly() {
-        let store = TelemetryStore::new(10, None);
+        let store = TelemetryStore::new(10, None).unwrap();
         for i in 0..15 {
             let cat = if i % 2 == 0 { "usb" } else { "hid" };
             let lvl = if i == 14 { "error" } else { "info" };
@@ -338,22 +380,31 @@ mod tests {
     }
 
     #[test]
-    fn hid_latency_metrics_and_jsonl_file_work() {
+    fn hid_latency_metrics_and_background_jsonl_writer_work() {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let tmp = std::env::temp_dir().join(format!("android-web-otg-tel-{unique}.jsonl"));
-        let store = TelemetryStore::new(50, Some(tmp.clone()));
-        store.record_hid("mouse", 2.0);
-        store.record_hid("key", 4.0);
-        store.log("ok", "aoa", "attached", None);
+        {
+            let store = TelemetryStore::new(50, Some(tmp.clone())).unwrap();
+            store.record_hid("mouse", 2.0);
+            store.record_hid("key", 4.0);
+            store.log("ok", "aoa", "attached", None);
 
-        let m = store.metrics();
-        assert_eq!(m.mouse_packets, 1);
-        assert_eq!(m.key_packets, 1);
-        assert!((m.avg_hid_ms - 3.0).abs() < 0.01);
-        assert!((m.max_hid_ms - 4.0).abs() < 0.01);
-
+            let m = store.metrics();
+            assert_eq!(m.mouse_packets, 1);
+            assert_eq!(m.key_packets, 1);
+            assert!((m.avg_hid_ms - 3.0).abs() < 0.01);
+            assert!((m.max_hid_ms - 4.0).abs() < 0.01);
+        }
+        // Dropping TelemetryStore flushes and joins background writer thread cleanly.
         let disk = fs::read_to_string(&tmp).expect("jsonl written");
         assert!(disk.contains("\"message\":\"attached\""));
         let _ = fs::remove_file(tmp);
+    }
+
+    #[test]
+    fn unwritable_log_file_fails_fast() {
+        let tmp_dir = std::env::temp_dir();
+        let res = TelemetryStore::new(50, Some(tmp_dir));
+        assert!(res.is_err());
     }
 }
